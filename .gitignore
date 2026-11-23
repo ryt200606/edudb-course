@@ -1,0 +1,6 @@
+**/.build/
+**/data-v4/
+**/demo-data/
+*.obj
+*.exe
+__pycache__/

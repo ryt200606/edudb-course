@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>EduDB · 数据库内核实验台</title><link rel="stylesheet" href="style.css?v=4.0.0"><link rel="stylesheet" href="ch11.css?v=4.0.0"><link rel="stylesheet" href="diagnostics.css?v=4.0.0"><link rel="stylesheet" href="plan.css?v=4.0.0"><link rel="stylesheet" href="robustness.css?v=4.0.0"></head>
+<body>
+<header><div><span class="brand">EduDB <small class="help-version">4.0</small></span><span class="subtitle">数据库内核实验台</span></div><div class="connection"><span id="lamp"></span><span id="status">正在连接</span><button id="reconnect" title="恢复连接，关闭本页旧会话并新建会话">重新连接</button></div></header>
+<div class="layout">
+<aside><div class="section-title">工作会话 <button id="new-session" title="新建独立会话">＋</button></div><div id="sessions"></div><div class="section-title">数据表 <button id="refresh-schema" title="刷新表结构">↻</button></div><div id="tables"></div><div class="aside-note">本地教学数据库<br>8 KiB 页 · 树 / 散列 / 位图<br>默认严格2PL · 多协议实验<br>所有会话共享同一服务内核</div></aside>
+<main>
+<div class="page-title"><div><p class="eyebrow">SQL WORKSPACE</p><h1>让一条 SQL 的执行过程可见</h1></div><button id="refresh-diag" class="secondary">刷新内核快照</button></div>
+<section class="workspace" aria-label="SQL编辑与执行">
+<div class="toolbar"><strong id="session-label">会话</strong><span id="tx-state">idle</span><div class="spacer"></div><button data-sql="BEGIN;">BEGIN</button><button data-sql="COMMIT;">COMMIT</button><button data-sql="ROLLBACK;">ROLLBACK</button></div>
+<label class="sr-only" for="sql">SQL语句</label><textarea id="sql" spellcheck="false">CREATE TABLE students (id INTEGER PRIMARY KEY, name VARCHAR(80) NOT NULL, score REAL);</textarea>
+<div class="execute-bar"><span>执行选中文字或编辑器中的一条 SQL。Ctrl / ⌘ + Enter 执行。</span><button id="execute" class="primary">执行 SQL</button></div>
+</section>
+<nav class="tabs" aria-label="结果视图"><button class="active" data-tab="result">查询结果</button><button data-tab="plan">执行计划</button><button data-tab="kernel">内核快照</button><button data-tab="ch11">第11章 · 索引与散列</button><button data-tab="interchange">I/O · 导入导出</button><button data-tab="help">第10—16章 · 功能与帮助</button></nav>
+<div id="message" role="status">连接后即可开始。可新建第二个会话观察事务隔离和锁等待。</div>
+<section id="result" class="tab-content active"><div id="result-meta"></div><div id="result-table" class="table-wrap"><p class="empty">执行 SQL 后，结果显示在这里。</p></div><div id="result-pagination" aria-label="结果分页"></div></section>
+<section id="plan" class="tab-content"><p class="section-description">显示内核实际返回的计划与统计。使用 EXPLAIN SELECT … 查看访问路径。</p><div id="plan-tree"></div><details><summary>计划原始 JSON</summary><pre id="plan-json">尚无执行计划。</pre></details></section>
+<section id="kernel" class="tab-content"><p class="section-description">诊断快照供只读观察。刷新后显示当前会话、锁、缓冲和 WAL 信息。独占锁定的表可能暂不列入结构快照，解锁后刷新即可；这不表示表已被删除。</p><p id="diagnostic-message" role="status"></p><div id="kernel-summary"></div><div id="kernel-sections"></div></section>
+<section id="ch11" class="tab-content" aria-label="第11章索引与散列实验">
+<h2>从查询条件观察访问结构</h2><p class="section-description">先创建真实表与索引，再读取结构和访问统计。结构检查在当前会话的只读操作中进行；独占锁会等待，检查不会创建索引或修改数据。结构与完整性以实际检查和验收记录核对；访问计数用于说明机制。</p>
+<div class="lab-controls"><label>表名 <input id="inspect-table" placeholder="例如 index_lab"></label><label>索引名（可空） <input id="inspect-index" placeholder="留空检查表组织"></label><label>最多页数 <input id="inspect-max-pages" type="number" value="256" min="1" max="2048"></label><button id="inspect-run" data-session-action>读取真实结构</button></div>
+<div id="inspect-message" role="status"></div><div id="inspect-view"><p class="empty">运行结构检查后显示页、键、桶、位图及实际计数；不会用示意数据填充。</p></div>
+<details><summary>结构原始 JSON</summary><pre id="inspect-json">尚未检查。</pre></details>
+<h2>11.4.6 · 真实轨迹驱动的闪存模型</h2><p class="section-description">此页自动收集实际SQL/导入导出/检查请求返回的文件调用轨迹，最多10万条；模型仅使用成功的data文件写入。固定参数：编程单元4 KiB、擦除块256 KiB、目标备用空间25%；小工作集为保留一个可复制块会向上取整，输出有效备用比例。逻辑页地址按首次出现压紧，保留热度与顺序；顺序异地编程，选择有效页最少的封闭块做复制回收。模型编程/擦除/WA是模拟计数，不是本机SSD时延、物理写放大、寿命或断电实测。截断轨迹会明确标记。</p><div class="lab-controls"><button id="flash-run">用本页真实轨迹运行模型</button><button id="flash-clear" class="secondary">清空本页轨迹</button></div><div id="flash-view"></div><pre id="flash-result">先执行实际写入，再运行模型。清空只影响本页轨迹集合。</pre>
+<h2>教材实验路线</h2><div class="chapter-topics"><article><strong>11.1—11.2 · 基本概念与顺序索引</strong><p>比较主/辅助索引、稠密/稀疏、多级索引和重复键，检查记录的物理组织与索引条目。</p></article><article><strong>11.3—11.4 · B+ 树索引文件与扩展</strong><p>对照内部节点、叶链和记录指针；观察分裂、重分布、合并、根变化、变长键与覆盖索引。</p></article><article><strong>11.5—11.7 · 多码访问与散列</strong><p>比较复合码前缀和多索引访问、静态桶及溢出链、可扩展目录与线性散列增长。</p></article><article><strong>11.8—11.9 · 比较与位图</strong><p>同一数据/谓词比较顺序索引与散列、缓存、文件读写和 WAL；观察低基数位图及 AND/OR/NOT。</p></article><article><strong>11.10—11.11 · SQL 索引定义与总结</strong><p>用 CREATE/DROP INDEX 建立、删除索引，读取真实计划和统计；把实现能力、实验结论与适用条件对应起来。</p></article></div>
+</section>
+<section id="interchange" class="tab-content" aria-label="数据导入导出">
+<h2>文件与数据库之间的 I/O</h2><p class="section-description">文件由本浏览器读取或下载；服务器只接收内容，不接受服务器文件路径。CSV 的未加引号 \N 表示 NULL，加引号的 "\N" 表示文本；BLOB 使用十六进制。导入应在 idle 会话执行；解析、类型或约束校验失败会回滚本次导入。提交I/O失败或连接中断时先核对结果，勿自动重试。</p>
+<div class="lab-controls"><label>格式 <select id="transfer-format"><option value="csv">CSV</option><option value="sql">SQL 逻辑导出</option></select></label><label>表名（SQL 全库导出可空） <input id="transfer-table" placeholder="students"></label><label class="checkbox"><input id="transfer-header" type="checkbox" checked> CSV 含表头</label></div>
+<div class="lab-controls"><label>待导入 UTF-8 文件 <input id="transfer-file" type="file" accept=".csv,.sql,.txt,text/csv,text/plain"></label><button id="transfer-import" data-session-action>导入文件（原子提交）</button><button id="transfer-export" data-session-action>导出并下载</button></div>
+<label class="optional-query">CSV 可选查询（留空导出整表，填写时使用查询）<textarea id="transfer-query" spellcheck="false" rows="2" placeholder="SELECT id,name FROM students ORDER BY id;"></textarea></label>
+<p class="section-description">专用导入接口上限为 64 MiB 编码后的 JSON；CSV 最多1024字段/行、100万行及200万个单元格；SQL 导入最多10万条语句。SQL 工作区仍为 1 MiB。文本编码错误、引号/列数错误、类型或约束错误会明确返回。BLOB/整库导出仍受事务、结果和资源限额约束。</p>
+<div id="transfer-message" role="status"></div><pre id="transfer-result">尚未导入或导出。</pre>
+</section>
+<section id="help" class="tab-content" aria-label="第10到16章功能导航与使用帮助">
+<div class="help-heading"><div><p class="help-kicker">EDUDB 4.0 · 使用与教材路线</p><h2>从一条 SQL 到存储、并发与恢复</h2></div><div class="help-quick"><button data-help-jump="kernel">内核诊断</button><button data-help-jump="ch11">索引结构</button><button data-help-jump="interchange">导入导出</button></div></div>
+<p class="help-intro">先启动独立演示库，使用demo_前缀准备数据。选择章节，展开步骤，再把<strong>一条SQL</strong>载入上方编辑器；由你点击执行。多会话实验按A/B标记切换，先结束已有事务再切换协议。</p>
+<div id="help-runtime" class="help-runtime" role="status">尚未取得实例模式。</div>
+<div id="help-chapters" class="help-chapters" role="group" aria-label="选择教材章节"></div>
+<div class="help-section-heading"><h3 id="help-category-label">基础操作</h3><span>按当前实例模式与角色选择路线；载入不执行</span></div>
+<p id="help-action-message" class="help-action" role="status" aria-live="polite">载入示例只填写编辑器，不发送执行请求。</p>
+<div id="help-guides" class="help-guides"></div>
+<details class="help-mode-guide"><summary>先选对恢复模式与事务协议</summary><div class="help-table-wrap"><table><thead><tr><th>目录模式 / 角色</th><th>事务选择</th><th>边界</th></tr></thead><tbody>
+<tr><td>REDO_PRIVATE / PRIMARY</td><td>STRICT_2PL、SNAPSHOT/RC、OCC、TS/Thomas、MV2PL、MVTO</td><td>不同活动协议epoch不混用。RECORD仅Strict2PL单INTEGER主键范围；其他形状会真实回退TABLE。</td></tr>
+<tr><td>ARIES_PAGE / PRIMARY</td><td>STRICT_2PL + TABLE，可READ ONLY</td><td>恢复模式和STEAL/FORCE策略在新目录创建时持久保存；当前拒绝RECORD和MV协议。缓冲authority为ARIES自己的LRU。</td></tr>
+<tr><td>旧控制格式3 / RESTORED_READ_ONLY / STANDBY</td><td>只读查询</td><td>BEGIN READ WRITE不能解除实例只读。旧库经独占源、隔离副本和逻辑核对迁移到新控制格式4；物理页格式仍是3。</td></tr>
+<tr><td>TREE / REDO_PRIVATE</td><td>有界静态行树，显式节点X锁</td><td>首锁自由、后锁持父；未写节点可早释，已释不重获，写节点持至结束。单PK受保护读写，拒绝动态拓扑与复杂SQL；不同节点共享页仍可能FCW中止。</td></tr>
+<tr><td>ARIES_LOGICAL / PRIMARY</td><td>独立新目录的有界逻辑UNDO实验</td><td>Strict2PL单PK行保护，整表/非PK读用粗表S。全局3个未完成行操作、128行/表、1 KiB行、1024页、两次逆操作预算；逻辑与物理LSN独立。拒绝MV/TREE、备份归档主备及batch。</td></tr>
+<tr><td>同表自连接消除</td><td>单INTEGER非NULL主键双别名等值形状</td><td>按安全证明与成本选路，以EXPLAIN实际rewrite和执行计数核对；不泛化为任意连接消除。</td></tr>
+<tr><td>批量共享扫描</td><td>REDO_PRIVATE / ARIES_PAGE；idle、Strict2PL TABLE、只读</td><td>专用batch API/CLI：同表受限SELECT，最多16条/总256 KiB SQL。共享一次基表游标，仍有spool读写；网页编辑器逐条SQL不自动调用batch。</td></tr>
+</tbody></table></div></details>
+<details class="help-startup"><summary>启动、重启、迁移与恢复命令（PowerShell）</summary><p>命令中的占位符应替换为真实路径。为不同目录使用不同端口；同一数据目录只允许一个服务进程。shell/run/网页通过同一服务内核操作。</p><div id="help-commands"></div></details>
+<details class="help-boundaries"><summary>操作错误、资源与验证范围</summary><ul>
+<li>显式事务执行错误后检查transaction_state；aborted时执行ROLLBACK。关闭会话成功会回滚未完成事务；页面离开仅尽力清理，服务端闲置超时默认10分钟。</li>
+<li>提交请求中断或持久化失败可能结果未知。先核对数据与恢复状态，不自动重试写入。检查点BUSY是有界等待后的结果，可结束事务后重试。</li>
+<li>普通槽记录不跨页，BLOB独立分块；FIXED/VARIABLE二进制记录当前只用于HEAP。页号单调分配，支持空槽复用，尚无在线整页回收或文件收缩。</li>
+<li>普通SQL和专用导入有各自输入/结果/事务/版本历史预算。超限明确失败；估计成本、文件调用、真实轨迹闪存模型、硬件测量分别解释。</li>
+<li>恢复验收覆盖实际进程异常退出，未实测物理断电。备份/LSN恢复/异步备库当前是REDO_PRIVATE、同用户同机fence范围；未验跨机容灾或零丢失。</li>
+<li>外键和分布式执行尚未提供；子查询、版本协议、真实外排等已经实现，具体形状与兼容性看本页及实际返回计划。</li>
+</ul><button id="checkpoint" class="secondary">请求当前实例检查点</button></details>
+</section>
+</main></div><script src="diagnostics.js?v=4.0.0"></script><script src="plan.js?v=4.0.0"></script><script src="flash.js?v=4.0.0"></script><script src="app.js?v=4.0.0"></script><script src="ch11.js?v=4.0.0"></script></body></html>

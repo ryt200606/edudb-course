@@ -1,0 +1,17 @@
+#include "recovery_archive.hpp"
+#include "edudb.hpp"
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <thread>
+using namespace edudb;namespace r=edudb::recovery;namespace fs=std::filesystem;
+void check(bool yes,const std::string& why){if(!yes)throw std::runtime_error(why);}
+template<class F>void error(const std::string& code,F callback){try{callback();}catch(const DbError& e){check(e.code==code,"expected "+code+", got "+e.code+": "+e.what());return;}throw std::runtime_error("missing "+code);}
+int main(int argc,char** argv){try{check(argc==3,"usage IMMUTABLE_BACKUP NEW_CASE_ROOT");auto source=fs::u8path(argv[1]),root=fs::u8path(argv[2]);fs::create_directories(root);json control;{std::ifstream input(source/"control.json",std::ios::binary);input>>control;}auto data=r::open_read_only((source/"data.pages").u8string());auto wal=r::open_read_only((source/"wal-1.log").u8string());auto end=control.at("checkpoint_lsn").get<std::uint64_t>();json cases=json::array();
+ r::Limits tiny;tiny.data_bytes=8192;error("BACKUP_LIMIT",[&]{r::create_backup(*data,control,end,(root/"too-small-data").u8string(),tiny);});check(!fs::exists(root/"too-small-data"),"rejected data budget created destination");cases.push_back("data_byte_budget_rejected_before_destination");
+ r::Limits exact;exact.wal_bytes=64;check(r::inspect_backup(source.u8string(),exact)["state"]=="COMPLETE","empty WAL64 budget incorrectly capped control JSON");r::restore_backup(source.u8string(),{},end,(root/"exact-empty-wal").u8string(),exact);check(fs::file_size(root/"exact-empty-wal/wal-1.log")==64,"exact WAL budget restore");cases.push_back("WAL_budget_separate_from_control_manifest_and_exact64_header");
+ r::Limits quota;quota.archive_directory_bytes=16;error("ARCHIVE_LIMIT",[&]{r::archive_wal(*wal,control["uuid"],control["timeline"],(root/"quota-bytes").u8string(),quota);});check(fs::is_empty(root/"quota-bytes"),"quota failure published files");quota={};quota.archive_files=1;error("ARCHIVE_LIMIT",[&]{r::archive_wal(*wal,control["uuid"],control["timeline"],(root/"quota-count").u8string(),quota);});check(fs::is_empty(root/"quota-count"),"file-count quota failure published files");cases.push_back("retained_archive_bytes_and_file_count_enforced_before_copy");
+ bool reached=false;r::Limits deadline;deadline.timeout_ms=20;deadline.phase_hook=[&](const char* point){if(std::string(point)=="copy_before_sync"){reached=true;std::this_thread::sleep_for(std::chrono::milliseconds(40));}};error("BACKUP_TIMEOUT",[&]{r::create_backup(*data,control,end,(root/"deadline").u8string(),deadline);});check(!fs::exists(root/"deadline/backup-complete.json"),"timed out backup published COMPLETE");cases.push_back("operation_deadline_no_success_marker");
+ r::Limits invalid;invalid.wal_bytes=513ull*1024*1024;error("BACKUP_LIMIT",[&]{r::inspect_backup(source.u8string(),invalid);});invalid={};invalid.archive_files=8193;error("BACKUP_LIMIT",[&]{r::inspect_backup(source.u8string(),invalid);});cases.push_back("oversized_resource_configuration_rejected");
+ std::cout<<json{{"status","PASS"},{"checks",cases},{"deadline_reached_copy_hook",reached},{"scope","actual native immutable backup inputs and bounded failure gates; no throughput benchmark"}}.dump(2)<<"\n";return 0;
+ }catch(const DbError& e){std::cerr<<json{{"status","ERROR"},{"code",e.code},{"message",e.what()}}.dump()<<"\n";return 4;}catch(const std::exception& e){std::cerr<<json{{"status","FAIL"},{"message",e.what()}}.dump()<<"\n";return 5;}}

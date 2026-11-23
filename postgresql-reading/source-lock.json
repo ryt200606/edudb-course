@@ -1,0 +1,19 @@
+{
+  "postgresql": {
+    "version": "14.11",
+    "archive": "postgresql-14.11.tar.gz",
+    "sha256": "2c8f3f898e32a4a68bca30d21a78408cb37d3b501629448e0521aaaa93ebb5dd"
+  },
+  "odbc": {
+    "version": "16.00.0000",
+    "archive": "psqlodbc-16.00.0000.tar.gz",
+    "sha256": "afd892f89d2ecee8d3f3b2314f1bd5bf2d02201872c6e3431e5c31096eca4c8b"
+  },
+  "jdbc": {
+    "repository": "https://github.com/pgjdbc/pgjdbc",
+    "tag": "v42.3.0-rc5",
+    "commit": "a7d6e00b8281faaf6ff07b06a60d3291763afb8c",
+    "legacy_pom_version": "42.2.11-SNAPSHOT",
+    "note": "Record source revision and actual manifest version separately. The legacy Maven JAR requires its declared SCRAM runtime dependency set."
+  }
+}
