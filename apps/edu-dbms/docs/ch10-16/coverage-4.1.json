@@ -3,8 +3,8 @@
   "scope": "One mapping per numbered section. Runtime observations apply to linked CTest suites and chapter SQL, not an independent implementation/test per subsection.",
   "original_matrix_sha256": "0558595d9d1f9dd7ca293e1c5ce193e37b98022af16e9247c47d71d31c89a5ed",
   "baseline_zip_sha256": "8200985777a9184204746d01253d8069cf2e5b7a3bb3f2b5a38a62cf75c7907c",
-  "sql_receipt_sha256": "b800d427e106997dd977fda59ed58a510757732e300a00ee665631cc629eb2f4",
-  "ctest_sha256": "96b6ae17df3feedf4c83aff225d858d5c8d01965b5ca61b54dc2c1b0c77be5ef",
+  "sql_receipt_sha256": "8a88433d0c58b9998fc7e3256e63d41a8deab1c8ac5d67f2c00a43a9d1d5f105",
+  "ctest_sha256": "2a493eb3eb1129ce7ebf2f6aa88b098a359f5e53daf5c18d5dc81602ae3e0a7b",
   "mapped_rows": 198,
   "unique_anchor_locations": 216,
   "distinct_input_files": 116,
@@ -43,7 +43,7 @@
           "needle": "class NativeFile",
           "old_line": 79,
           "line": 79,
-          "sha256": "5538eade47976598ea5c081bf66bfd5c1375306986acd2b3c0e3c695cc524664",
+          "sha256": "5b484cc33287ed296fb8785e347cb1f633fc8ae0436e3a8733d03faac842226f",
           "match": "exact baseline line"
         }
       ],
@@ -52,8 +52,8 @@
           "input": "tests/ch10_storage_test.cpp",
           "needle": "int main",
           "old_line": 113,
-          "line": 113,
-          "sha256": "34817e6d2cba4a83003486d6ea9ef8a9da5e66b13f40603f34c0554e6c6459ca",
+          "line": 124,
+          "sha256": "215dabcef52f4c8d0d5fa8588d5a3df292969eabe7229a48662d4d80cc5faa6c",
           "match": "exact baseline line"
         },
         {
@@ -87,15 +87,15 @@
           "needle": "statistics persisted after reopen",
           "old_line": 46,
           "line": 46,
-          "sha256": "34817e6d2cba4a83003486d6ea9ef8a9da5e66b13f40603f34c0554e6c6459ca",
+          "sha256": "215dabcef52f4c8d0d5fa8588d5a3df292969eabe7229a48662d4d80cc5faa6c",
           "match": "exact baseline line"
         },
         {
           "input": "tests/ch10_storage_test.cpp",
           "needle": "snapshot exact physical pages",
           "old_line": 84,
-          "line": 84,
-          "sha256": "34817e6d2cba4a83003486d6ea9ef8a9da5e66b13f40603f34c0554e6c6459ca",
+          "line": 95,
+          "sha256": "215dabcef52f4c8d0d5fa8588d5a3df292969eabe7229a48662d4d80cc5faa6c",
           "match": "exact baseline line"
         },
         {
@@ -144,7 +144,7 @@
           "needle": "class NativeFile",
           "old_line": 79,
           "line": 79,
-          "sha256": "5538eade47976598ea5c081bf66bfd5c1375306986acd2b3c0e3c695cc524664",
+          "sha256": "5b484cc33287ed296fb8785e347cb1f633fc8ae0436e3a8733d03faac842226f",
           "match": "exact baseline line"
         }
       ],
@@ -153,8 +153,8 @@
           "input": "tests/ch10_storage_test.cpp",
           "needle": "int main",
           "old_line": 113,
-          "line": 113,
-          "sha256": "34817e6d2cba4a83003486d6ea9ef8a9da5e66b13f40603f34c0554e6c6459ca",
+          "line": 124,
+          "sha256": "215dabcef52f4c8d0d5fa8588d5a3df292969eabe7229a48662d4d80cc5faa6c",
           "match": "exact baseline line"
         },
         {
@@ -188,15 +188,15 @@
           "needle": "statistics persisted after reopen",
           "old_line": 46,
           "line": 46,
-          "sha256": "34817e6d2cba4a83003486d6ea9ef8a9da5e66b13f40603f34c0554e6c6459ca",
+          "sha256": "215dabcef52f4c8d0d5fa8588d5a3df292969eabe7229a48662d4d80cc5faa6c",
           "match": "exact baseline line"
         },
         {
           "input": "tests/ch10_storage_test.cpp",
           "needle": "snapshot exact physical pages",
           "old_line": 84,
-          "line": 84,
-          "sha256": "34817e6d2cba4a83003486d6ea9ef8a9da5e66b13f40603f34c0554e6c6459ca",
+          "line": 95,
+          "sha256": "215dabcef52f4c8d0d5fa8588d5a3df292969eabe7229a48662d4d80cc5faa6c",
           "match": "exact baseline line"
         },
         {
@@ -245,7 +245,7 @@
           "needle": "class NativeFile",
           "old_line": 79,
           "line": 79,
-          "sha256": "5538eade47976598ea5c081bf66bfd5c1375306986acd2b3c0e3c695cc524664",
+          "sha256": "5b484cc33287ed296fb8785e347cb1f633fc8ae0436e3a8733d03faac842226f",
           "match": "exact baseline line"
         }
       ],
@@ -254,8 +254,8 @@
           "input": "tests/ch10_storage_test.cpp",
           "needle": "int main",
           "old_line": 113,
-          "line": 113,
-          "sha256": "34817e6d2cba4a83003486d6ea9ef8a9da5e66b13f40603f34c0554e6c6459ca",
+          "line": 124,
+          "sha256": "215dabcef52f4c8d0d5fa8588d5a3df292969eabe7229a48662d4d80cc5faa6c",
           "match": "exact baseline line"
         },
         {
@@ -289,15 +289,15 @@
           "needle": "statistics persisted after reopen",
           "old_line": 46,
           "line": 46,
-          "sha256": "34817e6d2cba4a83003486d6ea9ef8a9da5e66b13f40603f34c0554e6c6459ca",
+          "sha256": "215dabcef52f4c8d0d5fa8588d5a3df292969eabe7229a48662d4d80cc5faa6c",
           "match": "exact baseline line"
         },
         {
           "input": "tests/ch10_storage_test.cpp",
           "needle": "snapshot exact physical pages",
           "old_line": 84,
-          "line": 84,
-          "sha256": "34817e6d2cba4a83003486d6ea9ef8a9da5e66b13f40603f34c0554e6c6459ca",
+          "line": 95,
+          "sha256": "215dabcef52f4c8d0d5fa8588d5a3df292969eabe7229a48662d4d80cc5faa6c",
           "match": "exact baseline line"
         },
         {
@@ -346,7 +346,7 @@
           "needle": "class NativeFile",
           "old_line": 79,
           "line": 79,
-          "sha256": "5538eade47976598ea5c081bf66bfd5c1375306986acd2b3c0e3c695cc524664",
+          "sha256": "5b484cc33287ed296fb8785e347cb1f633fc8ae0436e3a8733d03faac842226f",
           "match": "exact baseline line"
         }
       ],
@@ -355,8 +355,8 @@
           "input": "tests/ch10_storage_test.cpp",
           "needle": "int main",
           "old_line": 113,
-          "line": 113,
-          "sha256": "34817e6d2cba4a83003486d6ea9ef8a9da5e66b13f40603f34c0554e6c6459ca",
+          "line": 124,
+          "sha256": "215dabcef52f4c8d0d5fa8588d5a3df292969eabe7229a48662d4d80cc5faa6c",
           "match": "exact baseline line"
         },
         {
@@ -390,15 +390,15 @@
           "needle": "statistics persisted after reopen",
           "old_line": 46,
           "line": 46,
-          "sha256": "34817e6d2cba4a83003486d6ea9ef8a9da5e66b13f40603f34c0554e6c6459ca",
+          "sha256": "215dabcef52f4c8d0d5fa8588d5a3df292969eabe7229a48662d4d80cc5faa6c",
           "match": "exact baseline line"
         },
         {
           "input": "tests/ch10_storage_test.cpp",
           "needle": "snapshot exact physical pages",
           "old_line": 84,
-          "line": 84,
-          "sha256": "34817e6d2cba4a83003486d6ea9ef8a9da5e66b13f40603f34c0554e6c6459ca",
+          "line": 95,
+          "sha256": "215dabcef52f4c8d0d5fa8588d5a3df292969eabe7229a48662d4d80cc5faa6c",
           "match": "exact baseline line"
         },
         {
@@ -447,7 +447,7 @@
           "needle": "class NativeFile",
           "old_line": 79,
           "line": 79,
-          "sha256": "5538eade47976598ea5c081bf66bfd5c1375306986acd2b3c0e3c695cc524664",
+          "sha256": "5b484cc33287ed296fb8785e347cb1f633fc8ae0436e3a8733d03faac842226f",
           "match": "exact baseline line"
         }
       ],
@@ -456,8 +456,8 @@
           "input": "tests/ch10_storage_test.cpp",
           "needle": "int main",
           "old_line": 113,
-          "line": 113,
-          "sha256": "34817e6d2cba4a83003486d6ea9ef8a9da5e66b13f40603f34c0554e6c6459ca",
+          "line": 124,
+          "sha256": "215dabcef52f4c8d0d5fa8588d5a3df292969eabe7229a48662d4d80cc5faa6c",
           "match": "exact baseline line"
         },
         {
@@ -491,15 +491,15 @@
           "needle": "statistics persisted after reopen",
           "old_line": 46,
           "line": 46,
-          "sha256": "34817e6d2cba4a83003486d6ea9ef8a9da5e66b13f40603f34c0554e6c6459ca",
+          "sha256": "215dabcef52f4c8d0d5fa8588d5a3df292969eabe7229a48662d4d80cc5faa6c",
           "match": "exact baseline line"
         },
         {
           "input": "tests/ch10_storage_test.cpp",
           "needle": "snapshot exact physical pages",
           "old_line": 84,
-          "line": 84,
-          "sha256": "34817e6d2cba4a83003486d6ea9ef8a9da5e66b13f40603f34c0554e6c6459ca",
+          "line": 95,
+          "sha256": "215dabcef52f4c8d0d5fa8588d5a3df292969eabe7229a48662d4d80cc5faa6c",
           "match": "exact baseline line"
         },
         {
@@ -905,7 +905,7 @@
           "needle": "class NativeFile",
           "old_line": 79,
           "line": 79,
-          "sha256": "5538eade47976598ea5c081bf66bfd5c1375306986acd2b3c0e3c695cc524664",
+          "sha256": "5b484cc33287ed296fb8785e347cb1f633fc8ae0436e3a8733d03faac842226f",
           "match": "exact baseline line"
         }
       ],
@@ -914,8 +914,8 @@
           "input": "tests/ch10_storage_test.cpp",
           "needle": "int main",
           "old_line": 113,
-          "line": 113,
-          "sha256": "34817e6d2cba4a83003486d6ea9ef8a9da5e66b13f40603f34c0554e6c6459ca",
+          "line": 124,
+          "sha256": "215dabcef52f4c8d0d5fa8588d5a3df292969eabe7229a48662d4d80cc5faa6c",
           "match": "exact baseline line"
         },
         {
@@ -949,15 +949,15 @@
           "needle": "statistics persisted after reopen",
           "old_line": 46,
           "line": 46,
-          "sha256": "34817e6d2cba4a83003486d6ea9ef8a9da5e66b13f40603f34c0554e6c6459ca",
+          "sha256": "215dabcef52f4c8d0d5fa8588d5a3df292969eabe7229a48662d4d80cc5faa6c",
           "match": "exact baseline line"
         },
         {
           "input": "tests/ch10_storage_test.cpp",
           "needle": "snapshot exact physical pages",
           "old_line": 84,
-          "line": 84,
-          "sha256": "34817e6d2cba4a83003486d6ea9ef8a9da5e66b13f40603f34c0554e6c6459ca",
+          "line": 95,
+          "sha256": "215dabcef52f4c8d0d5fa8588d5a3df292969eabe7229a48662d4d80cc5faa6c",
           "match": "exact baseline line"
         },
         {
@@ -1320,8 +1320,8 @@
           "input": "tests/ch10_storage_test.cpp",
           "needle": "int main",
           "old_line": 113,
-          "line": 113,
-          "sha256": "34817e6d2cba4a83003486d6ea9ef8a9da5e66b13f40603f34c0554e6c6459ca",
+          "line": 124,
+          "sha256": "215dabcef52f4c8d0d5fa8588d5a3df292969eabe7229a48662d4d80cc5faa6c",
           "match": "exact baseline line"
         },
         {
@@ -1339,15 +1339,15 @@
           "needle": "statistics persisted after reopen",
           "old_line": 46,
           "line": 46,
-          "sha256": "34817e6d2cba4a83003486d6ea9ef8a9da5e66b13f40603f34c0554e6c6459ca",
+          "sha256": "215dabcef52f4c8d0d5fa8588d5a3df292969eabe7229a48662d4d80cc5faa6c",
           "match": "exact baseline line"
         },
         {
           "input": "tests/ch10_storage_test.cpp",
           "needle": "snapshot exact physical pages",
           "old_line": 84,
-          "line": 84,
-          "sha256": "34817e6d2cba4a83003486d6ea9ef8a9da5e66b13f40603f34c0554e6c6459ca",
+          "line": 95,
+          "sha256": "215dabcef52f4c8d0d5fa8588d5a3df292969eabe7229a48662d4d80cc5faa6c",
           "match": "exact baseline line"
         }
       ]
@@ -1387,8 +1387,8 @@
           "input": "tests/ch10_storage_test.cpp",
           "needle": "int main",
           "old_line": 113,
-          "line": 113,
-          "sha256": "34817e6d2cba4a83003486d6ea9ef8a9da5e66b13f40603f34c0554e6c6459ca",
+          "line": 124,
+          "sha256": "215dabcef52f4c8d0d5fa8588d5a3df292969eabe7229a48662d4d80cc5faa6c",
           "match": "exact baseline line"
         },
         {
@@ -1406,15 +1406,15 @@
           "needle": "statistics persisted after reopen",
           "old_line": 46,
           "line": 46,
-          "sha256": "34817e6d2cba4a83003486d6ea9ef8a9da5e66b13f40603f34c0554e6c6459ca",
+          "sha256": "215dabcef52f4c8d0d5fa8588d5a3df292969eabe7229a48662d4d80cc5faa6c",
           "match": "exact baseline line"
         },
         {
           "input": "tests/ch10_storage_test.cpp",
           "needle": "snapshot exact physical pages",
           "old_line": 84,
-          "line": 84,
-          "sha256": "34817e6d2cba4a83003486d6ea9ef8a9da5e66b13f40603f34c0554e6c6459ca",
+          "line": 95,
+          "sha256": "215dabcef52f4c8d0d5fa8588d5a3df292969eabe7229a48662d4d80cc5faa6c",
           "match": "exact baseline line"
         }
       ]
@@ -1531,8 +1531,8 @@
           "input": "tests/ch10_storage_test.cpp",
           "needle": "int main",
           "old_line": 113,
-          "line": 113,
-          "sha256": "34817e6d2cba4a83003486d6ea9ef8a9da5e66b13f40603f34c0554e6c6459ca",
+          "line": 124,
+          "sha256": "215dabcef52f4c8d0d5fa8588d5a3df292969eabe7229a48662d4d80cc5faa6c",
           "match": "exact baseline line"
         },
         {
@@ -1558,15 +1558,15 @@
           "needle": "statistics persisted after reopen",
           "old_line": 46,
           "line": 46,
-          "sha256": "34817e6d2cba4a83003486d6ea9ef8a9da5e66b13f40603f34c0554e6c6459ca",
+          "sha256": "215dabcef52f4c8d0d5fa8588d5a3df292969eabe7229a48662d4d80cc5faa6c",
           "match": "exact baseline line"
         },
         {
           "input": "tests/ch10_storage_test.cpp",
           "needle": "snapshot exact physical pages",
           "old_line": 84,
-          "line": 84,
-          "sha256": "34817e6d2cba4a83003486d6ea9ef8a9da5e66b13f40603f34c0554e6c6459ca",
+          "line": 95,
+          "sha256": "215dabcef52f4c8d0d5fa8588d5a3df292969eabe7229a48662d4d80cc5faa6c",
           "match": "exact baseline line"
         },
         {
@@ -1811,7 +1811,7 @@
           "needle": "class NativeFile",
           "old_line": 79,
           "line": 79,
-          "sha256": "5538eade47976598ea5c081bf66bfd5c1375306986acd2b3c0e3c695cc524664",
+          "sha256": "5b484cc33287ed296fb8785e347cb1f633fc8ae0436e3a8733d03faac842226f",
           "match": "exact baseline line"
         }
       ],
@@ -1820,8 +1820,8 @@
           "input": "tests/ch10_storage_test.cpp",
           "needle": "int main",
           "old_line": 113,
-          "line": 113,
-          "sha256": "34817e6d2cba4a83003486d6ea9ef8a9da5e66b13f40603f34c0554e6c6459ca",
+          "line": 124,
+          "sha256": "215dabcef52f4c8d0d5fa8588d5a3df292969eabe7229a48662d4d80cc5faa6c",
           "match": "exact baseline line"
         },
         {
@@ -1855,15 +1855,15 @@
           "needle": "statistics persisted after reopen",
           "old_line": 46,
           "line": 46,
-          "sha256": "34817e6d2cba4a83003486d6ea9ef8a9da5e66b13f40603f34c0554e6c6459ca",
+          "sha256": "215dabcef52f4c8d0d5fa8588d5a3df292969eabe7229a48662d4d80cc5faa6c",
           "match": "exact baseline line"
         },
         {
           "input": "tests/ch10_storage_test.cpp",
           "needle": "snapshot exact physical pages",
           "old_line": 84,
-          "line": 84,
-          "sha256": "34817e6d2cba4a83003486d6ea9ef8a9da5e66b13f40603f34c0554e6c6459ca",
+          "line": 95,
+          "sha256": "215dabcef52f4c8d0d5fa8588d5a3df292969eabe7229a48662d4d80cc5faa6c",
           "match": "exact baseline line"
         },
         {
@@ -4005,7 +4005,7 @@
           "needle": "class NativeFile",
           "old_line": 79,
           "line": 79,
-          "sha256": "5538eade47976598ea5c081bf66bfd5c1375306986acd2b3c0e3c695cc524664",
+          "sha256": "5b484cc33287ed296fb8785e347cb1f633fc8ae0436e3a8733d03faac842226f",
           "match": "exact baseline line"
         }
       ],
@@ -4014,8 +4014,8 @@
           "input": "tests/ch10_storage_test.cpp",
           "needle": "int main",
           "old_line": 113,
-          "line": 113,
-          "sha256": "34817e6d2cba4a83003486d6ea9ef8a9da5e66b13f40603f34c0554e6c6459ca",
+          "line": 124,
+          "sha256": "215dabcef52f4c8d0d5fa8588d5a3df292969eabe7229a48662d4d80cc5faa6c",
           "match": "exact baseline line"
         },
         {
@@ -4049,15 +4049,15 @@
           "needle": "statistics persisted after reopen",
           "old_line": 46,
           "line": 46,
-          "sha256": "34817e6d2cba4a83003486d6ea9ef8a9da5e66b13f40603f34c0554e6c6459ca",
+          "sha256": "215dabcef52f4c8d0d5fa8588d5a3df292969eabe7229a48662d4d80cc5faa6c",
           "match": "exact baseline line"
         },
         {
           "input": "tests/ch10_storage_test.cpp",
           "needle": "snapshot exact physical pages",
           "old_line": 84,
-          "line": 84,
-          "sha256": "34817e6d2cba4a83003486d6ea9ef8a9da5e66b13f40603f34c0554e6c6459ca",
+          "line": 95,
+          "sha256": "215dabcef52f4c8d0d5fa8588d5a3df292969eabe7229a48662d4d80cc5faa6c",
           "match": "exact baseline line"
         },
         {
@@ -4473,7 +4473,7 @@
           "needle": "json select",
           "old_line": 41,
           "line": 44,
-          "sha256": "9a404afdb53a3e2d568c4162a1f38ab1f0af72722adc0397f694cb2264d0ff1f",
+          "sha256": "27bd5d57fcf7fb1f4605d6f443c578821e9e88902d1991297dc81e9cf6bf7955",
           "match": "exact baseline line"
         },
         {
@@ -4490,8 +4490,8 @@
           "input": "tests/sql_test.cpp",
           "needle": "int main",
           "old_line": 323,
-          "line": 323,
-          "sha256": "984fbb409cef0d3d2dfa2cc48438018ac8559ce8b604cf46dfca52e7ed14021b",
+          "line": 339,
+          "sha256": "99ef8eb19216619c2ac728f2b572b6cfcec96878358be025c95dc64dc0a31ea3",
           "match": "exact baseline line"
         },
         {
@@ -4566,7 +4566,7 @@
           "needle": "class NativeFile",
           "old_line": 79,
           "line": 79,
-          "sha256": "5538eade47976598ea5c081bf66bfd5c1375306986acd2b3c0e3c695cc524664",
+          "sha256": "5b484cc33287ed296fb8785e347cb1f633fc8ae0436e3a8733d03faac842226f",
           "match": "exact baseline line"
         }
       ],
@@ -4575,8 +4575,8 @@
           "input": "tests/ch10_storage_test.cpp",
           "needle": "int main",
           "old_line": 113,
-          "line": 113,
-          "sha256": "34817e6d2cba4a83003486d6ea9ef8a9da5e66b13f40603f34c0554e6c6459ca",
+          "line": 124,
+          "sha256": "215dabcef52f4c8d0d5fa8588d5a3df292969eabe7229a48662d4d80cc5faa6c",
           "match": "exact baseline line"
         },
         {
@@ -4610,15 +4610,15 @@
           "needle": "statistics persisted after reopen",
           "old_line": 46,
           "line": 46,
-          "sha256": "34817e6d2cba4a83003486d6ea9ef8a9da5e66b13f40603f34c0554e6c6459ca",
+          "sha256": "215dabcef52f4c8d0d5fa8588d5a3df292969eabe7229a48662d4d80cc5faa6c",
           "match": "exact baseline line"
         },
         {
           "input": "tests/ch10_storage_test.cpp",
           "needle": "snapshot exact physical pages",
           "old_line": 84,
-          "line": 84,
-          "sha256": "34817e6d2cba4a83003486d6ea9ef8a9da5e66b13f40603f34c0554e6c6459ca",
+          "line": 95,
+          "sha256": "215dabcef52f4c8d0d5fa8588d5a3df292969eabe7229a48662d4d80cc5faa6c",
           "match": "exact baseline line"
         },
         {
@@ -4658,7 +4658,7 @@
           "needle": "json select",
           "old_line": 41,
           "line": 44,
-          "sha256": "9a404afdb53a3e2d568c4162a1f38ab1f0af72722adc0397f694cb2264d0ff1f",
+          "sha256": "27bd5d57fcf7fb1f4605d6f443c578821e9e88902d1991297dc81e9cf6bf7955",
           "match": "exact baseline line"
         },
         {
@@ -4675,8 +4675,8 @@
           "input": "tests/sql_test.cpp",
           "needle": "int main",
           "old_line": 323,
-          "line": 323,
-          "sha256": "984fbb409cef0d3d2dfa2cc48438018ac8559ce8b604cf46dfca52e7ed14021b",
+          "line": 339,
+          "sha256": "99ef8eb19216619c2ac728f2b572b6cfcec96878358be025c95dc64dc0a31ea3",
           "match": "exact baseline line"
         },
         {
@@ -4742,7 +4742,7 @@
           "needle": "json select",
           "old_line": 41,
           "line": 44,
-          "sha256": "9a404afdb53a3e2d568c4162a1f38ab1f0af72722adc0397f694cb2264d0ff1f",
+          "sha256": "27bd5d57fcf7fb1f4605d6f443c578821e9e88902d1991297dc81e9cf6bf7955",
           "match": "exact baseline line"
         },
         {
@@ -4759,8 +4759,8 @@
           "input": "tests/sql_test.cpp",
           "needle": "int main",
           "old_line": 323,
-          "line": 323,
-          "sha256": "984fbb409cef0d3d2dfa2cc48438018ac8559ce8b604cf46dfca52e7ed14021b",
+          "line": 339,
+          "sha256": "99ef8eb19216619c2ac728f2b572b6cfcec96878358be025c95dc64dc0a31ea3",
           "match": "exact baseline line"
         },
         {
@@ -4826,7 +4826,7 @@
           "needle": "json select",
           "old_line": 41,
           "line": 44,
-          "sha256": "9a404afdb53a3e2d568c4162a1f38ab1f0af72722adc0397f694cb2264d0ff1f",
+          "sha256": "27bd5d57fcf7fb1f4605d6f443c578821e9e88902d1991297dc81e9cf6bf7955",
           "match": "exact baseline line"
         },
         {
@@ -4843,8 +4843,8 @@
           "input": "tests/sql_test.cpp",
           "needle": "int main",
           "old_line": 323,
-          "line": 323,
-          "sha256": "984fbb409cef0d3d2dfa2cc48438018ac8559ce8b604cf46dfca52e7ed14021b",
+          "line": 339,
+          "sha256": "99ef8eb19216619c2ac728f2b572b6cfcec96878358be025c95dc64dc0a31ea3",
           "match": "exact baseline line"
         },
         {
@@ -4910,7 +4910,7 @@
           "needle": "json select",
           "old_line": 41,
           "line": 44,
-          "sha256": "9a404afdb53a3e2d568c4162a1f38ab1f0af72722adc0397f694cb2264d0ff1f",
+          "sha256": "27bd5d57fcf7fb1f4605d6f443c578821e9e88902d1991297dc81e9cf6bf7955",
           "match": "exact baseline line"
         },
         {
@@ -4927,8 +4927,8 @@
           "input": "tests/sql_test.cpp",
           "needle": "int main",
           "old_line": 323,
-          "line": 323,
-          "sha256": "984fbb409cef0d3d2dfa2cc48438018ac8559ce8b604cf46dfca52e7ed14021b",
+          "line": 339,
+          "sha256": "99ef8eb19216619c2ac728f2b572b6cfcec96878358be025c95dc64dc0a31ea3",
           "match": "exact baseline line"
         },
         {
@@ -5176,7 +5176,7 @@
           "needle": "join_hint",
           "old_line": 210,
           "line": 213,
-          "sha256": "9a404afdb53a3e2d568c4162a1f38ab1f0af72722adc0397f694cb2264d0ff1f",
+          "sha256": "27bd5d57fcf7fb1f4605d6f443c578821e9e88902d1991297dc81e9cf6bf7955",
           "match": "exact baseline line"
         }
       ],
@@ -5252,7 +5252,7 @@
           "needle": "join_hint",
           "old_line": 210,
           "line": 213,
-          "sha256": "9a404afdb53a3e2d568c4162a1f38ab1f0af72722adc0397f694cb2264d0ff1f",
+          "sha256": "27bd5d57fcf7fb1f4605d6f443c578821e9e88902d1991297dc81e9cf6bf7955",
           "match": "exact baseline line"
         }
       ],
@@ -5328,7 +5328,7 @@
           "needle": "join_hint",
           "old_line": 210,
           "line": 213,
-          "sha256": "9a404afdb53a3e2d568c4162a1f38ab1f0af72722adc0397f694cb2264d0ff1f",
+          "sha256": "27bd5d57fcf7fb1f4605d6f443c578821e9e88902d1991297dc81e9cf6bf7955",
           "match": "exact baseline line"
         }
       ],
@@ -5404,7 +5404,7 @@
           "needle": "join_hint",
           "old_line": 210,
           "line": 213,
-          "sha256": "9a404afdb53a3e2d568c4162a1f38ab1f0af72722adc0397f694cb2264d0ff1f",
+          "sha256": "27bd5d57fcf7fb1f4605d6f443c578821e9e88902d1991297dc81e9cf6bf7955",
           "match": "exact baseline line"
         }
       ],
@@ -5480,7 +5480,7 @@
           "needle": "join_hint",
           "old_line": 210,
           "line": 213,
-          "sha256": "9a404afdb53a3e2d568c4162a1f38ab1f0af72722adc0397f694cb2264d0ff1f",
+          "sha256": "27bd5d57fcf7fb1f4605d6f443c578821e9e88902d1991297dc81e9cf6bf7955",
           "match": "exact baseline line"
         }
       ],
@@ -5556,7 +5556,7 @@
           "needle": "join_hint",
           "old_line": 210,
           "line": 213,
-          "sha256": "9a404afdb53a3e2d568c4162a1f38ab1f0af72722adc0397f694cb2264d0ff1f",
+          "sha256": "27bd5d57fcf7fb1f4605d6f443c578821e9e88902d1991297dc81e9cf6bf7955",
           "match": "exact baseline line"
         }
       ],
@@ -6088,7 +6088,7 @@
           "needle": "streaming",
           "old_line": 299,
           "line": 302,
-          "sha256": "9a404afdb53a3e2d568c4162a1f38ab1f0af72722adc0397f694cb2264d0ff1f",
+          "sha256": "27bd5d57fcf7fb1f4605d6f443c578821e9e88902d1991297dc81e9cf6bf7955",
           "match": "exact baseline line"
         }
       ],
@@ -6164,7 +6164,7 @@
           "needle": "streaming",
           "old_line": 299,
           "line": 302,
-          "sha256": "9a404afdb53a3e2d568c4162a1f38ab1f0af72722adc0397f694cb2264d0ff1f",
+          "sha256": "27bd5d57fcf7fb1f4605d6f443c578821e9e88902d1991297dc81e9cf6bf7955",
           "match": "exact baseline line"
         }
       ],
@@ -6240,7 +6240,7 @@
           "needle": "streaming",
           "old_line": 299,
           "line": 302,
-          "sha256": "9a404afdb53a3e2d568c4162a1f38ab1f0af72722adc0397f694cb2264d0ff1f",
+          "sha256": "27bd5d57fcf7fb1f4605d6f443c578821e9e88902d1991297dc81e9cf6bf7955",
           "match": "exact baseline line"
         }
       ],
@@ -6308,7 +6308,7 @@
           "needle": "json select",
           "old_line": 41,
           "line": 44,
-          "sha256": "9a404afdb53a3e2d568c4162a1f38ab1f0af72722adc0397f694cb2264d0ff1f",
+          "sha256": "27bd5d57fcf7fb1f4605d6f443c578821e9e88902d1991297dc81e9cf6bf7955",
           "match": "exact baseline line"
         },
         {
@@ -6325,8 +6325,8 @@
           "input": "tests/sql_test.cpp",
           "needle": "int main",
           "old_line": 323,
-          "line": 323,
-          "sha256": "984fbb409cef0d3d2dfa2cc48438018ac8559ce8b604cf46dfca52e7ed14021b",
+          "line": 339,
+          "sha256": "99ef8eb19216619c2ac728f2b572b6cfcec96878358be025c95dc64dc0a31ea3",
           "match": "exact baseline line"
         },
         {
@@ -6399,7 +6399,7 @@
           "needle": "json analyze",
           "old_line": 3,
           "line": 5,
-          "sha256": "9a404afdb53a3e2d568c4162a1f38ab1f0af72722adc0397f694cb2264d0ff1f",
+          "sha256": "27bd5d57fcf7fb1f4605d6f443c578821e9e88902d1991297dc81e9cf6bf7955",
           "match": "exact baseline line"
         }
       ],
@@ -6707,7 +6707,7 @@
           "needle": "json analyze",
           "old_line": 3,
           "line": 5,
-          "sha256": "9a404afdb53a3e2d568c4162a1f38ab1f0af72722adc0397f694cb2264d0ff1f",
+          "sha256": "27bd5d57fcf7fb1f4605d6f443c578821e9e88902d1991297dc81e9cf6bf7955",
           "match": "exact baseline line"
         }
       ],
@@ -6765,7 +6765,7 @@
           "needle": "json analyze",
           "old_line": 3,
           "line": 5,
-          "sha256": "9a404afdb53a3e2d568c4162a1f38ab1f0af72722adc0397f694cb2264d0ff1f",
+          "sha256": "27bd5d57fcf7fb1f4605d6f443c578821e9e88902d1991297dc81e9cf6bf7955",
           "match": "exact baseline line"
         }
       ],
@@ -6823,7 +6823,7 @@
           "needle": "json analyze",
           "old_line": 3,
           "line": 5,
-          "sha256": "9a404afdb53a3e2d568c4162a1f38ab1f0af72722adc0397f694cb2264d0ff1f",
+          "sha256": "27bd5d57fcf7fb1f4605d6f443c578821e9e88902d1991297dc81e9cf6bf7955",
           "match": "exact baseline line"
         }
       ],
@@ -6881,7 +6881,7 @@
           "needle": "json analyze",
           "old_line": 3,
           "line": 5,
-          "sha256": "9a404afdb53a3e2d568c4162a1f38ab1f0af72722adc0397f694cb2264d0ff1f",
+          "sha256": "27bd5d57fcf7fb1f4605d6f443c578821e9e88902d1991297dc81e9cf6bf7955",
           "match": "exact baseline line"
         }
       ],
@@ -6939,7 +6939,7 @@
           "needle": "json analyze",
           "old_line": 3,
           "line": 5,
-          "sha256": "9a404afdb53a3e2d568c4162a1f38ab1f0af72722adc0397f694cb2264d0ff1f",
+          "sha256": "27bd5d57fcf7fb1f4605d6f443c578821e9e88902d1991297dc81e9cf6bf7955",
           "match": "exact baseline line"
         }
       ],
@@ -6997,7 +6997,7 @@
           "needle": "json analyze",
           "old_line": 3,
           "line": 5,
-          "sha256": "9a404afdb53a3e2d568c4162a1f38ab1f0af72722adc0397f694cb2264d0ff1f",
+          "sha256": "27bd5d57fcf7fb1f4605d6f443c578821e9e88902d1991297dc81e9cf6bf7955",
           "match": "exact baseline line"
         }
       ],
@@ -7055,7 +7055,7 @@
           "needle": "json analyze",
           "old_line": 3,
           "line": 5,
-          "sha256": "9a404afdb53a3e2d568c4162a1f38ab1f0af72722adc0397f694cb2264d0ff1f",
+          "sha256": "27bd5d57fcf7fb1f4605d6f443c578821e9e88902d1991297dc81e9cf6bf7955",
           "match": "exact baseline line"
         }
       ],
@@ -7113,7 +7113,7 @@
           "needle": "json analyze",
           "old_line": 3,
           "line": 5,
-          "sha256": "9a404afdb53a3e2d568c4162a1f38ab1f0af72722adc0397f694cb2264d0ff1f",
+          "sha256": "27bd5d57fcf7fb1f4605d6f443c578821e9e88902d1991297dc81e9cf6bf7955",
           "match": "exact baseline line"
         }
       ],
@@ -7171,7 +7171,7 @@
           "needle": "json analyze",
           "old_line": 3,
           "line": 5,
-          "sha256": "9a404afdb53a3e2d568c4162a1f38ab1f0af72722adc0397f694cb2264d0ff1f",
+          "sha256": "27bd5d57fcf7fb1f4605d6f443c578821e9e88902d1991297dc81e9cf6bf7955",
           "match": "exact baseline line"
         }
       ],
@@ -7229,7 +7229,7 @@
           "needle": "json analyze",
           "old_line": 3,
           "line": 5,
-          "sha256": "9a404afdb53a3e2d568c4162a1f38ab1f0af72722adc0397f694cb2264d0ff1f",
+          "sha256": "27bd5d57fcf7fb1f4605d6f443c578821e9e88902d1991297dc81e9cf6bf7955",
           "match": "exact baseline line"
         }
       ],
@@ -8030,7 +8030,7 @@
           "needle": "matches_snapshot",
           "old_line": 64,
           "line": 71,
-          "sha256": "ae26e72aef88e13a6209c2c0c4d557f754ad476f64292dbe20b753c19b72a636",
+          "sha256": "a8cfc4a3c20e88411be5a0f26b0970b0f44043f6e08b64f1336531b35f8d83a6",
           "match": "exact baseline line"
         }
       ],
@@ -8039,8 +8039,8 @@
           "input": "tests/sql_test.cpp",
           "needle": "int main",
           "old_line": 323,
-          "line": 323,
-          "sha256": "984fbb409cef0d3d2dfa2cc48438018ac8559ce8b604cf46dfca52e7ed14021b",
+          "line": 339,
+          "sha256": "99ef8eb19216619c2ac728f2b572b6cfcec96878358be025c95dc64dc0a31ea3",
           "match": "exact baseline line"
         },
         {
@@ -8196,7 +8196,7 @@
           "needle": "json analyze",
           "old_line": 3,
           "line": 5,
-          "sha256": "9a404afdb53a3e2d568c4162a1f38ab1f0af72722adc0397f694cb2264d0ff1f",
+          "sha256": "27bd5d57fcf7fb1f4605d6f443c578821e9e88902d1991297dc81e9cf6bf7955",
           "match": "exact baseline line"
         }
       ],
@@ -8265,8 +8265,8 @@
           "input": "tests/sql_test.cpp",
           "needle": "int main",
           "old_line": 323,
-          "line": 323,
-          "sha256": "984fbb409cef0d3d2dfa2cc48438018ac8559ce8b604cf46dfca52e7ed14021b",
+          "line": 339,
+          "sha256": "99ef8eb19216619c2ac728f2b572b6cfcec96878358be025c95dc64dc0a31ea3",
           "match": "exact baseline line"
         },
         {
@@ -8374,8 +8374,8 @@
           "input": "tests/sql_test.cpp",
           "needle": "int main",
           "old_line": 323,
-          "line": 323,
-          "sha256": "984fbb409cef0d3d2dfa2cc48438018ac8559ce8b604cf46dfca52e7ed14021b",
+          "line": 339,
+          "sha256": "99ef8eb19216619c2ac728f2b572b6cfcec96878358be025c95dc64dc0a31ea3",
           "match": "exact baseline line"
         },
         {
@@ -8465,7 +8465,7 @@
           "needle": "wal->sync",
           "old_line": 393,
           "line": 420,
-          "sha256": "5538eade47976598ea5c081bf66bfd5c1375306986acd2b3c0e3c695cc524664",
+          "sha256": "5b484cc33287ed296fb8785e347cb1f633fc8ae0436e3a8733d03faac842226f",
           "match": "exact baseline line"
         },
         {
@@ -8551,7 +8551,7 @@
           "needle": "void recover",
           "old_line": 381,
           "line": 408,
-          "sha256": "5538eade47976598ea5c081bf66bfd5c1375306986acd2b3c0e3c695cc524664",
+          "sha256": "5b484cc33287ed296fb8785e347cb1f633fc8ae0436e3a8733d03faac842226f",
           "match": "exact baseline line"
         },
         {
@@ -8924,7 +8924,7 @@
           "needle": "void recover",
           "old_line": 381,
           "line": 408,
-          "sha256": "5538eade47976598ea5c081bf66bfd5c1375306986acd2b3c0e3c695cc524664",
+          "sha256": "5b484cc33287ed296fb8785e347cb1f633fc8ae0436e3a8733d03faac842226f",
           "match": "exact baseline line"
         },
         {
@@ -9138,7 +9138,7 @@
           "needle": "void recover",
           "old_line": 381,
           "line": 408,
-          "sha256": "5538eade47976598ea5c081bf66bfd5c1375306986acd2b3c0e3c695cc524664",
+          "sha256": "5b484cc33287ed296fb8785e347cb1f633fc8ae0436e3a8733d03faac842226f",
           "match": "exact baseline line"
         },
         {
@@ -9352,7 +9352,7 @@
           "needle": "void recover",
           "old_line": 381,
           "line": 408,
-          "sha256": "5538eade47976598ea5c081bf66bfd5c1375306986acd2b3c0e3c695cc524664",
+          "sha256": "5b484cc33287ed296fb8785e347cb1f633fc8ae0436e3a8733d03faac842226f",
           "match": "exact baseline line"
         },
         {
@@ -9983,8 +9983,8 @@
           "input": "tests/sql_test.cpp",
           "needle": "int main",
           "old_line": 323,
-          "line": 323,
-          "sha256": "984fbb409cef0d3d2dfa2cc48438018ac8559ce8b604cf46dfca52e7ed14021b",
+          "line": 339,
+          "sha256": "99ef8eb19216619c2ac728f2b572b6cfcec96878358be025c95dc64dc0a31ea3",
           "match": "exact baseline line"
         },
         {
@@ -10092,8 +10092,8 @@
           "input": "tests/sql_test.cpp",
           "needle": "int main",
           "old_line": 323,
-          "line": 323,
-          "sha256": "984fbb409cef0d3d2dfa2cc48438018ac8559ce8b604cf46dfca52e7ed14021b",
+          "line": 339,
+          "sha256": "99ef8eb19216619c2ac728f2b572b6cfcec96878358be025c95dc64dc0a31ea3",
           "match": "exact baseline line"
         },
         {
@@ -12376,7 +12376,7 @@
           "needle": "void recover",
           "old_line": 381,
           "line": 408,
-          "sha256": "5538eade47976598ea5c081bf66bfd5c1375306986acd2b3c0e3c695cc524664",
+          "sha256": "5b484cc33287ed296fb8785e347cb1f633fc8ae0436e3a8733d03faac842226f",
           "match": "exact baseline line"
         },
         {
@@ -12588,7 +12588,7 @@
           "needle": "wal->sync",
           "old_line": 393,
           "line": 420,
-          "sha256": "5538eade47976598ea5c081bf66bfd5c1375306986acd2b3c0e3c695cc524664",
+          "sha256": "5b484cc33287ed296fb8785e347cb1f633fc8ae0436e3a8733d03faac842226f",
           "match": "exact baseline line"
         },
         {
@@ -12672,7 +12672,7 @@
           "needle": "wal->sync",
           "old_line": 393,
           "line": 420,
-          "sha256": "5538eade47976598ea5c081bf66bfd5c1375306986acd2b3c0e3c695cc524664",
+          "sha256": "5b484cc33287ed296fb8785e347cb1f633fc8ae0436e3a8733d03faac842226f",
           "match": "exact baseline line"
         },
         {
@@ -12756,7 +12756,7 @@
           "needle": "wal->sync",
           "old_line": 393,
           "line": 420,
-          "sha256": "5538eade47976598ea5c081bf66bfd5c1375306986acd2b3c0e3c695cc524664",
+          "sha256": "5b484cc33287ed296fb8785e347cb1f633fc8ae0436e3a8733d03faac842226f",
           "match": "exact baseline line"
         },
         {
@@ -15735,7 +15735,7 @@
           "needle": "class NativeFile",
           "old_line": 79,
           "line": 79,
-          "sha256": "5538eade47976598ea5c081bf66bfd5c1375306986acd2b3c0e3c695cc524664",
+          "sha256": "5b484cc33287ed296fb8785e347cb1f633fc8ae0436e3a8733d03faac842226f",
           "match": "exact baseline line"
         }
       ],
@@ -15744,8 +15744,8 @@
           "input": "tests/ch10_storage_test.cpp",
           "needle": "int main",
           "old_line": 113,
-          "line": 113,
-          "sha256": "34817e6d2cba4a83003486d6ea9ef8a9da5e66b13f40603f34c0554e6c6459ca",
+          "line": 124,
+          "sha256": "215dabcef52f4c8d0d5fa8588d5a3df292969eabe7229a48662d4d80cc5faa6c",
           "match": "exact baseline line"
         },
         {
@@ -15779,15 +15779,15 @@
           "needle": "statistics persisted after reopen",
           "old_line": 46,
           "line": 46,
-          "sha256": "34817e6d2cba4a83003486d6ea9ef8a9da5e66b13f40603f34c0554e6c6459ca",
+          "sha256": "215dabcef52f4c8d0d5fa8588d5a3df292969eabe7229a48662d4d80cc5faa6c",
           "match": "exact baseline line"
         },
         {
           "input": "tests/ch10_storage_test.cpp",
           "needle": "snapshot exact physical pages",
           "old_line": 84,
-          "line": 84,
-          "sha256": "34817e6d2cba4a83003486d6ea9ef8a9da5e66b13f40603f34c0554e6c6459ca",
+          "line": 95,
+          "sha256": "215dabcef52f4c8d0d5fa8588d5a3df292969eabe7229a48662d4d80cc5faa6c",
           "match": "exact baseline line"
         },
         {

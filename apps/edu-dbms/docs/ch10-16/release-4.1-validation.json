@@ -2,7 +2,7 @@
   "product": "EduDB",
   "version": "4.1.0",
   "observed_on": "2026-11-24",
-  "source_scope": "CMake, src, include, third_party, web and demo match the two builds byte for byte. The cross-system return experiment extends the external Python driver after the native build.",
+  "source_scope": "248 frozen CMake/source/header/vendor/test/web/demo inputs match byte for byte on Windows and WSL2.",
   "storage": {
     "control_format": 4,
     "physical_page_format": 3,
@@ -10,7 +10,7 @@
     "sql_catalog_revision": 1
   },
   "Windows": {
-    "program_sha256": "b4c48f0d0e46f3b55ddac03afe02bbf7d646b8e27ad053d6e60255b9c8a6f223",
+    "program_sha256": "7c8b31952dd82f3a1067016fe13e12e00421a7900064bf6d9c1ff78d68172d42",
     "native_tests": 69,
     "external_groups": [
       "backup-processes",
@@ -29,15 +29,15 @@
     "chapter_sql_files": 10,
     "installed_course_demo_statements": 12,
     "installed_demo_self_check_statements": 15,
-    "sha256_native_junit": "96b6ae17df3feedf4c83aff225d858d5c8d01965b5ca61b54dc2c1b0c77be5ef",
-    "sha256_integrated_receipt": "0f0215670ab4301e908ec01c22972abf210fa1f997d4cdb96d206eb195ccc47e"
+    "sha256_native_junit": "2a493eb3eb1129ce7ebf2f6aa88b098a359f5e53daf5c18d5dc81602ae3e0a7b",
+    "sha256_integrated_receipt": "4fb9f40e808567925c12677e02cf87701ca4b0e05f85a13d97f8db8bf20e3714"
   },
   "WSL2_Ubuntu_24_04": {
-    "program_sha256": "952838e825538da7fd14f141bc01a289adb1ab8b6fc35342c0da7ef26b097000",
+    "program_sha256": "1f151af0cc4b5c25797b88196cfbcbd1cc5da0efc9aeba3d8e640cbf431c3d7a",
     "native_tests": 69,
     "installed_course_demo_statements": 12,
-    "sha256_native_junit": "64be917d8e7318eef19bc300adc8b034978688e7e8c5c98113c7c3dbf9fc4ade",
-    "sha256_build_receipt": "f6bfd558ad82727b1c61c0a360fbb883329b68768fc68dd557ad58be4b15bf3f"
+    "sha256_native_junit": "8285103ea6cd7140a387c6bc8f2fdbc16ae489aeee5b74189d04e1926daa0445",
+    "sha256_build_receipt": "6193289272445cdd343f6b83517dcc29d1cfcbddd3e5698521c8b460d15d61e1"
   },
   "course_differential": {
     "sql_per_interface": 26,
@@ -73,7 +73,7 @@
     },
     "sql_files": 10,
     "relative_matrix": "coverage-4.1.json",
-    "matrix_sha256": "b836ea8ac770d8695c0ae563b240f0dbed8fb7cc24b54eca98d736097e8fe4eb"
+    "matrix_sha256": "f319f9e55834054e26918af57cd9ed2a43d00d92b723bc0449c357a160661e95"
   },
   "controlled_transfer": {
     "forward": "Windows to WSL2 Linux via loopback forwarding",
@@ -96,7 +96,49 @@
     "stale_receiver_token_status": 403,
     "rejoined_fingerprint": "2206d763b3692485200c77454cf8851fce8f5e15128a1e9b1512fa3b5eafd029",
     "sha256_test": "dcdc212be5f05ae0345da4a10c48e9a5499eff89c64e12dc8afd2cfdc95d5c83",
-    "sha256_receipt": "ebb18dd4da4077d35b53e0492aac7817b8ebbf14ef7ffdf6423c5c304de317a9"
+    "sha256_receipt": "8cacfda1c73671b9a543dc890e5d59185f354489e13db05a8b24765ae4a3b896"
   },
-  "scope": "Functional acceptance and controlled single-host process/instance experiments. Performance sampling and sanitizers have separate results."
+  "scope": "Functional acceptance and controlled single-host process/instance experiments. Performance sampling and sanitizers have separate results.",
+  "frozen_inputs": 248,
+  "external_driver_changes_since_native_build": {
+    "tests/kernel_benchmark_matrix.py": {
+      "frozen": "efb208d62076851ba4865d4dc9c694e99b4bffdc3616129933b417e56b12ca3a",
+      "current": "740a27ade3673f3a864f20431b682569db781622dfaa68e11c336010329a26a5"
+    }
+  },
+  "held_out_differential": {
+    "seeds": [
+      2329204699,
+      3474373590,
+      3062379017
+    ],
+    "platforms": 2,
+    "transactions_per_platform": 240,
+    "mutations_per_platform": 496,
+    "ordered_table_comparisons_per_platform": 720,
+    "transcript_sha256": {
+      "2329204699": "ea0bc8a9d0bcea6cb9362203b7997085b38cf0bae33851ec1d151c8a9017fe4b",
+      "3474373590": "6dcc73f0f3886d28b5fdb96580796978e8a6833c0c741c67d46b6d945ab5cb84",
+      "3062379017": "27c07c54f9ee1c411a348959cfab050b1732f516c2717a2279813acdedb03bab"
+    },
+    "seed_derivation": "int.from_bytes(sha256(f'EduDB4.1-course-integrity-held-out|{windows_sha256}|{linux_sha256}|{i}'.encode('ascii')).digest()[:4], 'big') for i in range(3); binary digests use lowercase hexadecimal"
+  },
+  "client_history": {
+    "Windows": {
+      "process_fault_windows": 6,
+      "two_restarts_equal_each_window": true,
+      "confirmed_full": 36,
+      "aborted_empty": 24,
+      "unknown_full": 9,
+      "unknown_empty": 3
+    },
+    "WSL2": {
+      "process_fault_windows": 6,
+      "two_restarts_equal_each_window": true,
+      "confirmed_full": 36,
+      "aborted_empty": 24,
+      "unknown_full": 12,
+      "unknown_empty": 0
+    }
+  }
 }
