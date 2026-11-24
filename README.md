@@ -49,6 +49,7 @@ bash build.sh
 
 ```sh
 python3 tests/commit_history.py --exe .build/linux/edudb --output ./history-run
+python3 tests/optimizer_lifecycle.py --exe .build/linux/edudb --web ./web --output ./mcv-lifecycle.json
 python3 tests/kernel_benchmark.py --exe .build/linux/edudb --label candidate --profile smoke --output ./bench-smoke
 ```
 
