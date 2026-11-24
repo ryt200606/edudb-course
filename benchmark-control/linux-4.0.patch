@@ -1,0 +1,133 @@
+--- a/src/aries_logical.cpp
++++ b/src/aries_logical.cpp
+@@ -16,10 +16,18 @@
+ #include <set>
+ #include <thread>
+ #include <vector>
++#ifdef _WIN32
+ #ifndef NOMINMAX
+ #define NOMINMAX
+ #endif
+ #include <windows.h>
++#else
++#include <cerrno>
++#include <fcntl.h>
++#include <sys/file.h>
++#include <sys/stat.h>
++#include <unistd.h>
++#endif
+ namespace edudb::logical {
+ namespace {
+ namespace fs=std::filesystem;using Clock=std::chrono::steady_clock;
+--- a/src/fencing.cpp
++++ b/src/fencing.cpp
+@@ -3,6 +3,9 @@
+ #include "media_native.hpp"
+ #include <mutex>
+ #include <random>
++#ifndef _WIN32
++#include <pwd.h>
++#endif
+ #include <iomanip>
+ #include <sstream>
+ #include <thread>
+@@ -23,7 +26,14 @@
+ #ifdef _WIN32
+     auto size=GetEnvironmentVariableW(L"LOCALAPPDATA",nullptr,0);if(!size||size>32768)fail("FENCE_PATH","LocalAppData unavailable");std::wstring value(size,L'\0');auto actual=GetEnvironmentVariableW(L"LOCALAPPDATA",value.data(),size);if(!actual||actual>=size)fail("FENCE_PATH","LocalAppData changed");value.resize(actual);return fs::path(value)/"EduDBFence";
+ #else
+-    fail("NOT_SUPPORTED","Default same-machine fencing domain currently uses Windows LocalAppData");
++    // Use the account directory from the OS. Changing HOME or cwd must never
++    // give the same writer a second fencing domain.
++    struct passwd account{}, *found=nullptr;
++    std::vector<char> scratch(16384);
++    if(getpwuid_r(geteuid(),&account,scratch.data(),scratch.size(),&found)!=0 ||
++       !found || !account.pw_dir || account.pw_dir[0]!='/')
++        fail("FENCE_PATH","Cannot determine a stable local account directory");
++    return fs::path(account.pw_dir)/".local"/"state"/"EduDBFence";
+ #endif
+ }
+ json load_state(const fs::path& path,const std::string& uuid){ReadOnlyFile file(path,true);auto bytes=file.size();if(bytes<2||bytes>65536)fail("FENCE_CORRUPT","Fence state has invalid length");std::string text(bytes,'\0');file.read(0,reinterpret_cast<unsigned char*>(text.data()),text.size());try{auto state=json::parse(text);auto sum=state.at("checksum").get<std::uint32_t>();state.erase("checksum");if(crc(state.dump())!=sum||state.at("format")!="EduDBFence1"||state.at("uuid")!=uuid||!state.at("epoch").is_number_unsigned()||!state.at("epoch").get<std::uint64_t>())fail("FENCE_CORRUPT","Fence identity/checksum/epoch invalid");identity_ok(state.at("owner_instance_id").get<std::string>());identity_ok(state.at("timeline").get<std::string>());return state;}catch(const DbError&){throw;}catch(...){fail("FENCE_CORRUPT","Malformed shared fence state");}}
+--- a/src/media_native.hpp
++++ b/src/media_native.hpp
+@@ -15,6 +15,8 @@
+ #else
+ #include <fcntl.h>
+ #include <sys/stat.h>
++#include <sys/file.h>
++#include "portable_sha256.hpp"
+ #include <unistd.h>
+ #endif
+ 
+@@ -39,7 +41,12 @@
+ #else
+         fd_=::open(path_.c_str(),O_RDWR|(create?O_CREAT:0)|(create_new?(O_EXCL|O_CREAT):0),0600);
+         if(fd_<0)fail("MEDIA_IO","Open member/control file failed: "+path_.u8string());
+-        (void)exclusive;
++        if(exclusive && ::flock(fd_,LOCK_EX | LOCK_NB)!=0){
++            const int error=errno;
++            ::close(fd_);fd_=-1;
++            fail(error==EWOULDBLOCK ? "MEDIA_LOCKED" : "MEDIA_IO",
++                 "Cannot acquire exclusive file lease: "+path_.u8string());
++        }
+ #endif
+     }
+     ~File(){
+--- /dev/null
++++ b/src/portable_sha256.hpp
+@@ -0,0 +1,20 @@
++#pragma once
++#include <algorithm>
++#include <array>
++#include <cstdint>
++#include <cstring>
++#include <iomanip>
++#include <sstream>
++#include <string>
++
++namespace edudb {
++class PortableSha256 {
++    std::array<std::uint32_t,8> h{0x6a09e667u,0xbb67ae85u,0x3c6ef372u,0xa54ff53au,0x510e527fu,0x9b05688cu,0x1f83d9abu,0x5be0cd19u};
++    std::array<unsigned char,64> pending{};std::size_t used=0;std::uint64_t bytes=0;
++    static std::uint32_t r(std::uint32_t x,unsigned n){return (x>>n)|(x<<(32-n));}
++    void block(const unsigned char* p){static constexpr std::uint32_t k[]={0x428a2f98u,0x71374491u,0xb5c0fbcfu,0xe9b5dba5u,0x3956c25bu,0x59f111f1u,0x923f82a4u,0xab1c5ed5u,0xd807aa98u,0x12835b01u,0x243185beu,0x550c7dc3u,0x72be5d74u,0x80deb1feu,0x9bdc06a7u,0xc19bf174u,0xe49b69c1u,0xefbe4786u,0x0fc19dc6u,0x240ca1ccu,0x2de92c6fu,0x4a7484aau,0x5cb0a9dcu,0x76f988dau,0x983e5152u,0xa831c66du,0xb00327c8u,0xbf597fc7u,0xc6e00bf3u,0xd5a79147u,0x06ca6351u,0x14292967u,0x27b70a85u,0x2e1b2138u,0x4d2c6dfcu,0x53380d13u,0x650a7354u,0x766a0abbu,0x81c2c92eu,0x92722c85u,0xa2bfe8a1u,0xa81a664bu,0xc24b8b70u,0xc76c51a3u,0xd192e819u,0xd6990624u,0xf40e3585u,0x106aa070u,0x19a4c116u,0x1e376c08u,0x2748774cu,0x34b0bcb5u,0x391c0cb3u,0x4ed8aa4au,0x5b9cca4fu,0x682e6ff3u,0x748f82eeu,0x78a5636fu,0x84c87814u,0x8cc70208u,0x90befffau,0xa4506cebu,0xbef9a3f7u,0xc67178f2u};std::array<std::uint32_t,64>w{};for(unsigned i=0;i<16;++i)w[i]=(std::uint32_t(p[i*4])<<24)|(std::uint32_t(p[i*4+1])<<16)|(std::uint32_t(p[i*4+2])<<8)|p[i*4+3];for(unsigned i=16;i<64;++i){auto a=r(w[i-15],7)^r(w[i-15],18)^(w[i-15]>>3),b=r(w[i-2],17)^r(w[i-2],19)^(w[i-2]>>10);w[i]=w[i-16]+a+w[i-7]+b;}auto a=h[0],b=h[1],c=h[2],d=h[3],e=h[4],f=h[5],g=h[6],z=h[7];for(unsigned i=0;i<64;++i){auto t=z+(r(e,6)^r(e,11)^r(e,25))+((e&f)^((~e)&g))+k[i]+w[i],q=(r(a,2)^r(a,13)^r(a,22))+((a&b)^(a&c)^(b&c));z=g;g=f;f=e;e=d+t;d=c;c=b;b=a;a=t+q;}h[0]+=a;h[1]+=b;h[2]+=c;h[3]+=d;h[4]+=e;h[5]+=f;h[6]+=g;h[7]+=z;}
++public:
++    void add(const char* p,std::size_t n){bytes+=n;while(n){auto take=std::min(n,64-used);std::memcpy(pending.data()+used,p,take);p+=take;n-=take;used+=take;if(used==64){block(pending.data());used=0;}}}
++    std::string finish(){auto bits=bytes*8;pending[used++]=0x80;if(used>56){std::fill(pending.begin()+used,pending.end(),0);block(pending.data());used=0;}std::fill(pending.begin()+used,pending.begin()+56,0);for(unsigned i=0;i<8;++i)pending[63-i]=static_cast<unsigned char>(bits>>(8*i));block(pending.data());std::ostringstream out;out<<std::hex<<std::setfill('0');for(auto v:h)out<<std::setw(8)<<v;return out.str();}
++};
++} // namespace edudb
+--- a/src/recovery_native.inc
++++ b/src/recovery_native.inc
+@@ -59,14 +59,14 @@
+ class Sha256 {
+ #ifdef _WIN32
+     HCRYPTPROV provider_=0;HCRYPTHASH hash_=0;
++#else
++    PortableSha256 hash_;
+ #endif
+ public:
+     Sha256(){
+ #ifdef _WIN32
+         if(!CryptAcquireContextW(&provider_,nullptr,nullptr,PROV_RSA_AES,CRYPT_VERIFYCONTEXT))fail("BACKUP_HASH","SHA256 provider unavailable");
+         if(!CryptCreateHash(provider_,CALG_SHA_256,0,0,&hash_)){CryptReleaseContext(provider_,0);provider_=0;fail("BACKUP_HASH","SHA256 context unavailable");}
+-#else
+-        fail("NOT_SUPPORTED","This stage's native SHA256 implementation is Windows only");
+ #endif
+     }
+     ~Sha256(){
+@@ -79,14 +79,14 @@
+ #ifdef _WIN32
+         while(size){auto n=static_cast<DWORD>(std::min<std::size_t>(size,1u<<28));if(!CryptHashData(hash_,p,n,0))fail("BACKUP_HASH","SHA256 update failed");p+=n;size-=n;}
+ #else
+-        (void)p;(void)size;
++        hash_.add(reinterpret_cast<const char*>(p),size);
+ #endif
+     }
+     std::string finish(){
+ #ifdef _WIN32
+         unsigned char bytes[32];DWORD size=32;if(!CryptGetHashParam(hash_,HP_HASHVAL,bytes,&size,0)||size!=32)fail("BACKUP_HASH","SHA256 finish failed");static constexpr char digits[]="0123456789abcdef";std::string text;for(auto b:bytes){text+=digits[b>>4];text+=digits[b&15];}return text;
+ #else
+-        return {};
++        return hash_.finish();
+ #endif
+     }
+ };

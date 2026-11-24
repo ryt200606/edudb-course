@@ -1,0 +1,9 @@
+CREATE TABLE ch16_logical(id INTEGER PRIMARY KEY,v INTEGER);
+INSERT INTO ch16_logical VALUES(1,10),(2,20);
+BEGIN;
+SAVEPOINT before_logical;
+UPDATE ch16_logical SET v=11 WHERE id=1;
+ROLLBACK TO SAVEPOINT before_logical;
+COMMIT;
+SELECT * FROM ch16_logical ORDER BY id;
+VERIFY;

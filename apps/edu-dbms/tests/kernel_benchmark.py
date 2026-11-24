@@ -153,7 +153,7 @@ class Benchmark:
             metrics.append(compact(result))
         return (time.perf_counter() - start) * 1000, metrics
 
-    def ingest_fixture(self, server, sid, n, rep):
+    def ingest_fixture(self, server, sid, n):
         sql(server, sid, "CREATE TABLE bench(id INTEGER PRIMARY KEY,a INTEGER,b INTEGER,tag VARCHAR(180))")
         before = directory_bytes(server.data)
         elapsed,batches=self.import_rows(server,sid,0,n)
@@ -161,15 +161,15 @@ class Benchmark:
         bucket_sum=n//10*sum(BUCKETS)+sum(BUCKETS[:n%10])
         if actual!=[[str(v) for v in (n,0,n-1,n*(n-1)//2,bucket_sum,bucket_sum)]]:
             raise AssertionError("full CSV import aggregate fingerprint")
-        if self.args.suite=="all":
-            self.record(n,"full_csv_import",rep,elapsed,imported_rows=n,
-                        rows_per_second=n*1000/elapsed,batches=batches,
-                        aggregate_sha256=digest(actual),growth_bytes=directory_bytes(server.data)-before)
+        return {"phase":"fixture_preparation","rows":n,"csv_elapsed_ms":elapsed,
+                "batches":batches,"aggregate_sha256":digest(actual),
+                "growth_bytes_before_secondary_indexes":directory_bytes(server.data)-before}
 
     def fixture(self, where, n):
+        started=time.perf_counter()
         with self.server(where) as server:
             sid = server.session()
-            self.ingest_fixture(server,sid,n,0)
+            preparation=self.ingest_fixture(server,sid,n)
             sql(server, sid, "CREATE INDEX bench_a ON bench(a)")
             sql(server, sid, "CREATE INDEX bench_b ON bench(b)")
             if self.args.joint:
@@ -188,23 +188,37 @@ class Benchmark:
             checkpoint=server.api("/checkpoint","POST",{})
             if checkpoint.get("status")!="PASS":raise RuntimeError(str(checkpoint))
             server.close(sid)
+        preparation["total_setup_ms"]=(time.perf_counter()-started)*1000
+        return preparation
 
     def prepared_fixture(self,n):
-        parent=self.args.output/"fixtures"
-        parent.mkdir(exist_ok=True)
+        parent=(self.args.reuse_fixture_from or self.args.output)/"fixtures"
+        if not self.args.reuse_fixture_from:parent.mkdir(exist_ok=True)
         directory=parent/str(n)
+        # Group synchronization changes the durability schedule, never the
+        # rows/schema in a fully checkpointed and closed fixture.
+        expected={"binary_sha256":sha_file(self.args.exe),"benchmark_sha256":sha_file(Path(__file__)),
+                  "seed":SEED,"rows":n,"batch":self.args.batch,"joint_statistics":self.args.joint}
         def hashes(data):
             return {f.relative_to(data).as_posix():sha_file(f) for f in data.rglob("*") if f.is_file()}
         if directory.exists():
             saved=json.loads((directory/"snapshot.json").read_text(encoding="utf-8"))
+            if saved["identity"]!=expected:raise RuntimeError("incompatible fixture configuration: "+str(n))
             if hashes(directory/"db")!=saved["files"]:raise RuntimeError("fixture digest mismatch: "+str(n))
+        elif self.args.reuse_fixture_from:
+            raise RuntimeError("requested checkpointed fixture missing: "+str(directory))
         else:
             with tempfile.TemporaryDirectory(prefix="stage-",dir=self.temp) as temp:
                 stage=Path(temp)/"complete"
                 stage.mkdir()
-                self.fixture(stage/"db",n)
-                save_receipt(stage/"snapshot.json",{"rows":n,"files":hashes(stage/"db")})
+                preparation=self.fixture(stage/"db",n)
+                save_receipt(stage/"snapshot.json",{"identity":expected,"files":hashes(stage/"db"),
+                                                     "preparation":preparation})
                 os.replace(stage,directory)
+        saved=json.loads((directory/"snapshot.json").read_text(encoding="utf-8"))
+        save_receipt(self.args.output/f"preparation-{n}.json",
+                     {"reused":bool(self.args.reuse_fixture_from),"snapshot_files":saved["files"],
+                      "identity":saved["identity"],"preparation":saved["preparation"]})
         return directory/"db"
 
     @contextlib.contextmanager
@@ -254,10 +268,6 @@ class Benchmark:
 
     def writes(self, fixture, n):
         for rep in range(self.args.writes):
-            if rep and (n,"full_csv_import",rep) not in self.done:
-                with tempfile.TemporaryDirectory(prefix="ingest-",dir=self.temp) as directory:
-                    with self.server(Path(directory)/"db") as server:
-                        self.ingest_fixture(server,server.session(),n,rep)
             if (n,"incremental_csv",rep) not in self.done:
                 with self.restored(fixture) as data, self.server(data) as server:
                     sid = server.session()
@@ -360,7 +370,7 @@ class Benchmark:
             writes=["concurrent_"+str(c) for c in self.args.clients]
             reads=[]
             if self.args.suite=="all":
-                writes+=["full_csv_import","incremental_csv","single_update","restart_to_verified_query"]
+                writes+=["incremental_csv","single_update","restart_to_verified_query"]
                 reads=[case+"_"+state for case,_,_ in self.queries(n) for state in ("reopened","warm")]
             for cases,count in ((writes,self.args.writes),(reads,self.args.reads)):
                 for case in cases:
@@ -400,6 +410,8 @@ def main():
     p.add_argument("--exe",required=True,type=Path)
     p.add_argument("--output",required=True,type=Path)
     p.add_argument("--resume",action="store_true",help="Verify the existing binary, harness and fixtures and run missing samples")
+    p.add_argument("--prepare-only",action="store_true",help="Create or verify closed fixtures, then exit before measured runs")
+    p.add_argument("--reuse-fixture-from",type=Path,help="Use the verified checkpointed fixture from another configuration of the same binary")
     p.add_argument("--label",required=True)
     p.add_argument("--web",type=Path,default=Path(__file__).resolve().parents[1]/"web")
     p.add_argument("--profile",choices=("smoke","formal"),default="formal")
@@ -417,6 +429,8 @@ def main():
     args.reads,args.writes=(30,7) if formal else (1,1)
     args.clients=[1,2,4,8] if formal else [1,2]
     args.exe=args.exe.resolve(strict=True)
+    if args.reuse_fixture_from:
+        args.reuse_fixture_from=args.reuse_fixture_from.resolve(strict=True)
     args.output=args.output.resolve()
     args.output.mkdir(parents=True,exist_ok=args.resume)
     # All server children inherit this fixed operator memory budget.
@@ -429,6 +443,7 @@ def main():
                 server_args=args.server_args,joint_statistics=args.joint,batch=args.batch,operator_bytes=262144,buffer_frames=128,
                 seed=SEED,buckets_by_id_mod_10=BUCKETS,
                 fixture="fixed-seed permutation of 10 values; both predicates fully correlated; fixed-width payload",
+                reuse_fixture_from=str(args.reuse_fixture_from) if args.reuse_fixture_from else None,
                 cache_scope="reopened server and second execution; host OS cache retained",
                 restart_scope="killed owned server; restart includes readiness polling and first checked query",
                 status="RUNNING")
@@ -443,8 +458,12 @@ def main():
             with tempfile.TemporaryDirectory(dir=args.output,prefix="owned-data-") as root:
                 bench=Benchmark(args,Path(root))
                 try:
-                    info["measurements"]=bench.run()
-                    info["status"]="PASS"
+                    if args.prepare_only:
+                        for n in args.sizes:bench.prepared_fixture(n)
+                        info["status"]="PREPARED"
+                    else:
+                        info["measurements"]=bench.run()
+                        info["status"]="PASS"
                 finally:bench.raw.close()
         except BaseException as error:
             info["error"]=repr(error);info["status"]="FAIL"

@@ -1,0 +1,2 @@
+SELECT id FROM ch13_rows ORDER BY id;
+SELECT g,COUNT(*) AS n FROM ch13_rows GROUP BY g ORDER BY g;

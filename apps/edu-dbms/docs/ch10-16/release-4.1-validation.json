@@ -1,0 +1,102 @@
+{
+  "product": "EduDB",
+  "version": "4.1.0",
+  "observed_on": "2026-11-24",
+  "source_scope": "CMake, src, include, third_party, web and demo match the two builds byte for byte. The cross-system return experiment extends the external Python driver after the native build.",
+  "storage": {
+    "control_format": 4,
+    "physical_page_format": 3,
+    "minimum_reader_format": 5,
+    "sql_catalog_revision": 1
+  },
+  "Windows": {
+    "program_sha256": "b4c48f0d0e46f3b55ddac03afe02bbf7d646b8e27ad053d6e60255b9c8a6f223",
+    "native_tests": 69,
+    "external_groups": [
+      "backup-processes",
+      "backup-resources",
+      "logical-processes",
+      "access-aries-processes",
+      "shared-scan-http",
+      "interchange-http-cli",
+      "input-attacks-http"
+    ],
+    "web": {
+      "assertions": 98,
+      "http_observations": 28,
+      "screenshots": 12
+    },
+    "chapter_sql_files": 10,
+    "installed_course_demo_statements": 12,
+    "installed_demo_self_check_statements": 15,
+    "sha256_native_junit": "96b6ae17df3feedf4c83aff225d858d5c8d01965b5ca61b54dc2c1b0c77be5ef",
+    "sha256_integrated_receipt": "0f0215670ab4301e908ec01c22972abf210fa1f997d4cdb96d206eb195ccc47e"
+  },
+  "WSL2_Ubuntu_24_04": {
+    "program_sha256": "952838e825538da7fd14f141bc01a289adb1ab8b6fc35342c0da7ef26b097000",
+    "native_tests": 69,
+    "installed_course_demo_statements": 12,
+    "sha256_native_junit": "64be917d8e7318eef19bc300adc8b034978688e7e8c5c98113c7c3dbf9fc4ade",
+    "sha256_build_receipt": "f6bfd558ad82727b1c61c0a360fbb883329b68768fc68dd557ad58be4b15bf3f"
+  },
+  "course_differential": {
+    "sql_per_interface": 26,
+    "interfaces": [
+      "cli",
+      "http",
+      "browser"
+    ],
+    "references": [
+      "SQLite",
+      "PostgreSQL 14.11"
+    ],
+    "randomized_reference": "SQLite",
+    "randomized_checks": {
+      "transactions": 240,
+      "ordered_table_checks": 720,
+      "sql_mutations": 519
+    },
+    "recovery_fingerprint": "2c605de1133ac6605d2c9d82d39494566325821b94d722aa00e4bf69e5b07b52",
+    "process_recovery_modes": [
+      "REDO_PRIVATE",
+      "ARIES_PAGE"
+    ],
+    "logical_mode": "INTEGRITY_PROTOCOL"
+  },
+  "textbook": {
+    "sections": 198,
+    "classes": {
+      "alternative": 15,
+      "native": 178,
+      "model": 2,
+      "rejected": 3
+    },
+    "sql_files": 10,
+    "relative_matrix": "coverage-4.1.json",
+    "matrix_sha256": "b836ea8ac770d8695c0ae563b240f0dbed8fb7cc24b54eca98d736097e8fe4eb"
+  },
+  "controlled_transfer": {
+    "forward": "Windows to WSL2 Linux via loopback forwarding",
+    "return": "Linux to Windows by moving sealed backup/archive files through the WSL mount, then authenticating to the native loopback receiver",
+    "retired_windows_data_replaced": false,
+    "return_snapshot_rows": 66,
+    "rows_after_replay": 68,
+    "rows_after_reverse_handoff": 69,
+    "reverse_epoch": 3,
+    "return_lsn_before": {
+      "received_lsn": 24,
+      "forced_lsn": 24,
+      "replayed_lsn": 24
+    },
+    "return_lsn_after": {
+      "received_lsn": 30,
+      "forced_lsn": 30,
+      "replayed_lsn": 30
+    },
+    "stale_receiver_token_status": 403,
+    "rejoined_fingerprint": "2206d763b3692485200c77454cf8851fce8f5e15128a1e9b1512fa3b5eafd029",
+    "sha256_test": "dcdc212be5f05ae0345da4a10c48e9a5499eff89c64e12dc8afd2cfdc95d5c83",
+    "sha256_receipt": "ebb18dd4da4077d35b53e0492aac7817b8ebbf14ef7ffdf6423c5c304de317a9"
+  },
+  "scope": "Functional acceptance and controlled single-host process/instance experiments. Performance sampling and sanitizers have separate results."
+}

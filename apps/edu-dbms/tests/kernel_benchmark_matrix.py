@@ -14,6 +14,7 @@ def main():
     parser.add_argument("--baseline",type=Path,required=True)
     parser.add_argument("--candidate",type=Path,required=True)
     parser.add_argument("--baseline-label",required=True)
+    parser.add_argument("--baseline-fixtures",type=Path,help="Optional previously sealed baseline fixture collection")
     parser.add_argument("--output",type=Path,required=True)
     parser.add_argument("--web",type=Path,required=True)
     parser.add_argument("--sizes",default="1000,10000,100000")
@@ -38,6 +39,9 @@ def main():
                     path=args.output/f"{n}-{name}"
                     command=[sys.executable,str(benchmark),"--exe",str(exe),"--web",str(args.web),
                              "--profile",args.profile,"--sizes",str(n),"--label",label,"--output",str(path),*options]
+                    if name=="single":command.extend(["--reuse-fixture-from",str(args.output/f"{n}-group8")])
+                    if name=="control" and args.baseline_fixtures:
+                        command.extend(["--reuse-fixture-from",str(args.baseline_fixtures)])
                     if (path/"receipt.json").exists():command.append("--resume")
                     print("Running",n,name,flush=True)
                     # Each HTTP request also has a bounded timeout. Larger

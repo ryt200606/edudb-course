@@ -32,9 +32,14 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--exe',type=Path,required=True);p.add_argument('--web',type=Path,required=True)
     p.add_argument('--output',type=Path,required=True);p.add_argument('--transactions',type=int,default=80)
-    args=p.parse_args();out=args.output.resolve();out.mkdir(parents=True,exist_ok=False)
+    p.add_argument('--seeds', nargs='+', type=int, default=[42,1729,65537],
+                   help='Reproducible random seeds, one independent database per seed')
+    args=p.parse_args()
+    if args.transactions < 1 or len(set(args.seeds)) != len(args.seeds):
+        p.error('Every seed must be distinct and the transaction count must be positive')
+    out=args.output.resolve();out.mkdir(parents=True,exist_ok=False)
     seed_results=[];case_spec=json.loads(FIXTURE.read_text(encoding='utf8'))
-    for seed in (42,1729,65537):
+    for seed in args.seeds:
         rng=random.Random(seed);steps=[];sqlite=sqlite3.connect(':memory:',isolation_level=None)
         try:
             sqlite.execute('PRAGMA foreign_keys=ON')

@@ -41,6 +41,8 @@ bash build.sh
 
 ## 独立复现
 
+章节矩阵包含 198 项教材条目。178 项有原生实现，15 项采用有明确范围的替代方案，2 项是软件模型，3 项给出拒绝边界。每项都标出具体代码或测试。Windows 和 WSL2 的同版发行程序各通过 69 项原生测试；Windows 的网页观察和外部故障试验另行计数。[章节矩阵](apps/edu-dbms/docs/ch10-16/coverage-4.1.json) · [分项核验](apps/edu-dbms/docs/ch10-16/release-4.1-validation.json)
+
 接管后还可验证旧主回归。Windows 原数据目录保留退役状态，在同一台 Windows 主机的新目录恢复 Linux 新主的快照，再追赶其日志。测试核对备库只读、拒绝旧令牌、两端行集指纹，以及反向交接后第 3 任期的写入。反向归档经 WSL 共享挂载转送到 Windows 本地接收器。[双向交接脚本](apps/edu-dbms/tests/cross_system_handoff.py)
 
 从应用目录运行以下命令。故障脚本只启动自己的临时服务，输出目录须为新目录。26 步接口测试还使用 Node、Playwright 与 Chromium。公开版保留课内共同 SQL 的输入和预期结果。[业务用例](apps/edu-dbms/tests/course_integrity_workload.json)
@@ -51,3 +53,18 @@ python3 tests/kernel_benchmark.py --exe .build/linux/edudb --label candidate --p
 ```
 
 正式计时使用 [矩阵驱动](apps/edu-dbms/tests/kernel_benchmark_matrix.py)。在同一平台依次运行对照程序、新版组提交和新版逐笔同步；保留每次样本、配置、程序摘要与行集指纹。重开数据库进程会清空引擎缓冲，宿主文件缓存仍可能命中。计时结果需要连同负载和缓存条件解读。
+
+每个规模从空库装载一次以准备封存夹具。正式批量写入在已有 1 千、1 万或 10 万行的库上再导入 1,000 行，每次恢复到同一关闭快照，独立重复 7 次。每种读查询分别收集 30 次重开后和 30 次立即重读的样本。开发者可换用自己的随机种子检查约束，`tests/course_integrity_model.py --help` 给出参数；每个事务结束后分别核对三张表的有序内容。
+
+### 在 Linux 重建对照版本
+
+4.0.0 原源码依赖 Windows 系统调用。Linux 对照采用同一版本的 SQL 和 WAL 代码，只移植文件操作、文件锁、摘要及本地账户目录访问涉及的五个文件。以下命令从本仓库根目录运行，需要完整 Git 历史、Python 3、GNU patch、CMake、Ninja 和 C++17 编译器。准备器会对照实际参与实验的源树核验 116 个输入，忽略文本换行差异。[可审查的移植补丁](benchmark-control/linux-4.0.patch) · [校验清单](benchmark-control/control.json)
+
+```sh
+python3 benchmark-control/prepare.py --output /tmp/edudb-400-posix
+cmake -S /tmp/edudb-400-posix -B /tmp/edudb-400-build -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release '-DCMAKE_CXX_FLAGS_RELEASE=-O1 -DNDEBUG'
+cmake --build /tmp/edudb-400-build --target edudb --parallel 2
+```
+
+用相同编译选项构建 4.1 后，可将两个程序传给矩阵驱动。Windows 对照直接使用本仓库历史提交 `66449516546f9e5e5ddcf551832f32c112e81772` 的原始程序源码。

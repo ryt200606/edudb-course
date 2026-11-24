@@ -1,11 +1,9 @@
-﻿param([ValidateRange(1,65535)][int]$Port = 8765, [string]$Data = '')
+﻿param([ValidateRange(1,65535)][int]$Port = 8765, [string]$Data = '', [string]$Binary = '', [switch]$PrintBinary)
 $ErrorActionPreference = 'Stop'
 $taskRoot = $PSScriptRoot
 if (-not $Data) { $Data = Join-Path $taskRoot 'data-v41' }
-$taskBinary = Join-Path $taskRoot 'bin\edudb.exe'
-if (-not (Test-Path -LiteralPath $taskBinary)) { $taskBinary = Join-Path $taskRoot '.build\windows\edudb.exe' }
-if (-not (Test-Path -LiteralPath $taskBinary)) { $taskBinary = Join-Path $taskRoot '.build\edudb.exe' }
-if (-not (Test-Path -LiteralPath $taskBinary)) { throw 'Build first: cmake -S . -B .build -G Ninja; cmake --build .build' }
+$taskBinary = & (Join-Path $taskRoot 'resolve-program.ps1') -Binary $Binary
+if ($PrintBinary) { Write-Output $taskBinary; exit 0 }
 Write-Host "EduDB 4.1: http://127.0.0.1:$Port (Ctrl+C to stop)"
 Write-Host "Program: $taskBinary"
 Write-Host "Data: $Data"
