@@ -194,7 +194,8 @@ void LockManager::release_one_tree_node(std::uint64_t tx,const std::string& reso
     event("tree_node_released_early",tx,resource);cv_.notify_all();
 }
 void LockManager::release(std::uint64_t tx) {
-    std::lock_guard<std::mutex> guard(mutex_);std::vector<std::shared_ptr<Request>> remove;
+    std::unique_lock<std::mutex> guard(mutex_);
+    cv_.wait(guard,[&]{auto it=states_.find(tx);return it==states_.end()||it->second.phase!=Phase::Committing;});std::vector<std::shared_ptr<Request>> remove;
     for(const auto& p:pending_)if(p.second->tx==tx)remove.push_back(p.second);
     for(auto& r:remove){r->cancelled=true;r->cancellation="Transaction released while request was pending";remove_request(r);}
     for(auto it=range_holders_.begin();it!=range_holders_.end();){auto& grants=it->second;grants.erase(std::remove_if(grants.begin(),grants.end(),[&](const RangeGrant& g){return g.tx==tx;}),grants.end());if(grants.empty())it=range_holders_.erase(it);else ++it;}
@@ -213,19 +214,25 @@ LockManager::json LockManager::snapshot() {
 LockManager::CommitPermit::CommitPermit(LockManager* owner,std::uint64_t tx,std::unique_lock<std::mutex> guard):owner_(owner),tx_(tx),guard_(std::move(guard)) {}
 LockManager::CommitPermit::CommitPermit(CommitPermit&& other) noexcept:owner_(std::exchange(other.owner_,nullptr)),tx_(other.tx_),guard_(std::move(other.guard_)),completed_(other.completed_) {}
 LockManager::CommitPermit::~CommitPermit(){if(owner_&&!completed_)owner_->abandon_permit(*this);}
-LockManager::CommitPermit LockManager::prepare_commit(std::uint64_t tx) {
+LockManager::CommitPermit LockManager::prepare_commit(std::uint64_t tx,bool parallel_admission) {
     std::unique_lock<std::mutex> guard(mutex_);cancelled(tx);
     for(const auto& p:pending_)if(p.second->tx==tx)throw DbError("LOCK_REQUEST_ACTIVE","Cannot commit while a lock request remains pending");
-    auto& s=state(tx);if(s.phase!=Phase::Active)throw DbError("NO_TRANSACTION","Transaction commit already completed");s.phase=Phase::Committing;event("commit_gate_entered",tx);return CommitPermit(this,tx,std::move(guard));
+    auto& s=state(tx);if(s.phase!=Phase::Active)throw DbError("NO_TRANSACTION","Transaction commit already completed");s.phase=Phase::Committing;event("commit_gate_entered",tx);
+    // The protected phase prevents wounding; the transaction retains all grants.
+    // Allow unrelated writers to reach the same WAL force without a global lock.
+    if(parallel_admission)guard.unlock();
+    return CommitPermit(this,tx,std::move(guard));
 }
 void LockManager::finish_permit(CommitPermit& permit,Phase phase) {
-    if(permit.owner_!=this||permit.completed_||!permit.guard_.owns_lock())throw DbError("INTERNAL_ERROR","Invalid lock-manager commit permit");
+    if(permit.owner_!=this||permit.completed_)throw DbError("INTERNAL_ERROR","Invalid lock-manager commit permit");
+    if(!permit.guard_.owns_lock())permit.guard_.lock();
+    if(state(permit.tx_).phase!=Phase::Committing)throw DbError("INTERNAL_ERROR","Invalid committing phase");
     state(permit.tx_).phase=phase;event(phase==Phase::Committed?"commit_confirmed":phase==Phase::Unknown?"commit_outcome_unknown":"commit_failed_before_durability",permit.tx_);permit.completed_=true;permit.guard_.unlock();cv_.notify_all();
 }
 void LockManager::commit_succeeded(CommitPermit& permit){finish_permit(permit,Phase::Committed);}
 void LockManager::commit_failed(CommitPermit& permit,bool unknown){finish_permit(permit,unknown?Phase::Unknown:Phase::Failed);}
 void LockManager::abandon_permit(CommitPermit& permit) noexcept {
-    try{if(permit.guard_.owns_lock()){auto i=states_.find(permit.tx_);if(i!=states_.end())i->second.phase=Phase::Unknown;event("commit_outcome_unknown",permit.tx_);permit.completed_=true;permit.guard_.unlock();cv_.notify_all();}}catch(...){/* The unique_lock still releases its owned mutex on destruction. */}
+    try{if(!permit.guard_.owns_lock())permit.guard_.lock();{auto i=states_.find(permit.tx_);if(i!=states_.end())i->second.phase=Phase::Unknown;event("commit_outcome_unknown",permit.tx_);permit.completed_=true;permit.guard_.unlock();cv_.notify_all();}}catch(...){/* The unique_lock still releases its owned mutex on destruction. */}
 }
 void LockManager::register_resource(const std::string& resource,const std::string& parent) {
     std::lock_guard<std::mutex> guard(mutex_);if(resource.empty()||resource==parent)throw DbError("LOCK_HIERARCHY","Invalid resource parent");

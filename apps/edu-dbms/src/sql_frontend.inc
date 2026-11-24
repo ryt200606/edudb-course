@@ -297,7 +297,31 @@ class Parser {
     E negation(){DepthGuard guard(negation_depth,max_expression_depth,t().pos);if(is("NOT")){const auto position=t().pos;++at;auto e=expr(Expr::Unary,"NOT",position);set_arguments(e,{negation()});return e;}return comparison();}
     E conjunction(){auto a=negation();while(is("AND")){auto e=expr(Expr::Binary,"AND",t().pos);++at;set_arguments(e,{a,negation()});a=e;}return a;}
     E expression(){DepthGuard guard(expression_depth,max_expression_depth,t().pos);auto a=conjunction();while(is("OR")){auto e=expr(Expr::Binary,"OR",t().pos);++at;set_arguments(e,{a,conjunction()});a=e;}return a;}
-    json column_def(){
+    json integrity_constraint(const std::string& local_column={}) {
+        std::string name;
+        if(take("CONSTRAINT"))name=identifier();
+        if(take("CHECK")){
+            need("(");const auto start=t().pos;
+            expression();const auto end=t().pos;need(")");
+            return {{"kind","check"},{"name",name},{"sql",original_sql.substr(start,end-start)}};
+        }
+        json columns;
+        if(local_column.empty()){need("FOREIGN");need("KEY");columns=name_list();}
+        else columns=json::array({local_column});
+        need("REFERENCES");auto parent=identifier();auto keys=name_list();
+        std::string on_delete="RESTRICT";bool deletion=false,update=false;
+        while(take("ON")){
+            if(take("DELETE")){
+                if(deletion)fail("DUPLICATE_OPTION","Duplicate ON DELETE action");deletion=true;
+                if(take("CASCADE"))on_delete="CASCADE";else need("RESTRICT");
+            }else{
+                need("UPDATE");if(update)fail("DUPLICATE_OPTION","Duplicate ON UPDATE action");update=true;need("RESTRICT");
+            }
+        }
+        return {{"kind","foreign"},{"name",name},{"columns",columns},{"parent",parent},{"keys",keys},{"on_delete",on_delete}};
+    }
+    bool table_integrity() const {return is("CONSTRAINT")||is("CHECK")||is("FOREIGN");}
+    json column_def(json& constraints){
         json c={{"name",identifier()},{"length",0},{"not_null",false},{"primary",false},{"unique",false},{"default",nullptr}};
         auto ty=upper(identifier());
         if(ty=="INT"||ty=="BIGINT")ty="INTEGER";
@@ -307,7 +331,7 @@ class Parser {
         else if(ty=="BLOB"){std::size_t len=16u*1024u*1024u;if(take("(")){len=count();need(")");}if(!len||len>16u*1024u*1024u)fail("INVALID_SCHEMA","BLOB length must be 1..16777216 bytes");c["length"]=len;}
         else if(ty!="INTEGER"&&ty!="REAL"&&ty!="BOOLEAN")fail("UNSUPPORTED_TYPE","Supported types: INTEGER, REAL, BOOLEAN, VARCHAR(n), BLOB(n)");
         c["type"]=ty;
-        for(;;){if(take("NOT")){need("NULL");c["not_null"]=true;}else if(take("NULL")){}else if(take("PRIMARY")){need("KEY");c["primary"]=true;c["not_null"]=true;}else if(take("UNIQUE"))c["unique"]=true;else if(take("DEFAULT")){auto e=unary();if(e->kind==Expr::Unary&&(e->text=="-"||e->text=="+")&&e->args[0]->kind==Expr::Literal){auto v=e->args[0]->value;if(v.is_null())c["default"]=nullptr;else if(!v.is_number())fail("TYPE_ERROR","Invalid numeric DEFAULT");else if(e->text=="+")c["default"]=v;else if(v.is_number_integer()){auto n=v.get<std::int64_t>();if(n==std::numeric_limits<std::int64_t>::min())fail("NUMERIC_OVERFLOW","Default overflow");c["default"]=-n;}else c["default"]=-v.get<double>();}else if(e->kind==Expr::Literal)c["default"]=e->value;else fail("UNSUPPORTED_SQL","DEFAULT requires a constant");}else break;}
+        for(;;){if(is("CHECK")||is("REFERENCES")||is("CONSTRAINT"))constraints.push_back(integrity_constraint(c["name"].get<std::string>()));else if(take("NOT")){need("NULL");c["not_null"]=true;}else if(take("NULL")){}else if(take("PRIMARY")){need("KEY");c["primary"]=true;c["not_null"]=true;}else if(take("UNIQUE"))c["unique"]=true;else if(take("DEFAULT")){auto e=unary();if(e->kind==Expr::Unary&&(e->text=="-"||e->text=="+")&&e->args[0]->kind==Expr::Literal){auto v=e->args[0]->value;if(v.is_null())c["default"]=nullptr;else if(!v.is_number())fail("TYPE_ERROR","Invalid numeric DEFAULT");else if(e->text=="+")c["default"]=v;else if(v.is_number_integer()){auto n=v.get<std::int64_t>();if(n==std::numeric_limits<std::int64_t>::min())fail("NUMERIC_OVERFLOW","Default overflow");c["default"]=-n;}else c["default"]=-v.get<double>();}else if(e->kind==Expr::Literal)c["default"]=e->value;else fail("UNSUPPORTED_SQL","DEFAULT requires a constant");}else break;}
         return c;
     }
     bool alias_candidate() const {static const std::set<std::string> stop={"FROM","WHERE","INNER","LEFT","RIGHT","FULL","CROSS","OUTER","JOIN","ON","ORDER","BY","ASC","DESC","LIMIT","OFFSET","GROUP","HAVING","UNION","INTERSECT","EXCEPT","SET","VALUES","AND","OR","IS","USE"};return t().kind==Token::Ident&&(t().quoted||!stop.count(upper(t().text)));}
@@ -382,11 +406,23 @@ public:
         } else if(take("CREATE")){
             s.unique=take("UNIQUE");
             if(take("MATERIALIZED")){if(s.unique)fail("SYNTAX_ERROR","UNIQUE cannot precede MATERIALIZED VIEW");need("VIEW");s.kind="CREATE_MATERIALIZED_VIEW";s.table=identifier();s.options=method_options();need("AS");const auto start=t().pos;auto definition=select_expression();select_tail(definition);finish_statement_graph(definition,t().pos);if(definition.input_graph_depth>=input::sql_ast_walk_depth_limit)fail("QUERY_TOO_COMPLEX","Materialized definition height including query containers exceeds160",t().pos);s.query_definition=std::make_shared<Statement>(std::move(definition));s.definition_sql=original_sql.substr(std::size_t(start),std::size_t(t().pos-start));}
+            else if(take("STATISTICS")){
+                if(s.unique)fail("SYNTAX_ERROR","UNIQUE cannot precede STATISTICS");
+                s.kind="CREATE_STATISTICS";
+                if(take("IF")){need("NOT");need("EXISTS");s.if_not_exists=true;}
+                s.index=identifier();
+                if(take("(")){need("MCV");need(")");}
+                need("ON");s.names.push_back(identifier());need(",");s.names.push_back(identifier());
+                need("FROM");s.table=identifier();
+            }
             else if(take("CLUSTER")){if(s.unique)fail("SYNTAX_ERROR","UNIQUE cannot precede CLUSTER");s.kind="CREATE_CLUSTER";if(take("IF")){need("NOT");need("EXISTS");s.if_not_exists=true;}s.cluster_name=identifier();}
-            else if(take("TABLE")){if(s.unique)fail("SYNTAX_ERROR","UNIQUE must precede INDEX");s.kind="CREATE_TABLE";if(take("IF")){need("NOT");need("EXISTS");s.if_not_exists=true;}s.table=identifier();need("(");do{if(take("PRIMARY")){need("KEY");auto ns=name_list();s.table_constraints.push_back({{"columns",ns},{"kind","primary"}});}else if(take("UNIQUE")){auto ns=name_list();s.table_constraints.push_back({{"columns",ns},{"kind","unique"}});}else s.columns.push_back(column_def());}while(take(","));need(")");bool org_seen=false,record_seen=false,cluster_seen=false;while(is("ORGANIZATION")||is("RECORD")||is("CLUSTER")){if(take("CLUSTER")){if(cluster_seen)fail("DUPLICATE_OPTION","Duplicate cluster clause");cluster_seen=true;s.cluster_name=identifier();s.cluster_columns=name_list();}else if(take("ORGANIZATION")){if(org_seen)fail("DUPLICATE_OPTION","Duplicate organization");org_seen=true;s.organization=organization_spec();}else{need("RECORD");if(record_seen)fail("DUPLICATE_OPTION","Duplicate record format");record_seen=true;record_spec(s);}}}
+            else if(take("TABLE")){if(s.unique)fail("SYNTAX_ERROR","UNIQUE must precede INDEX");s.kind="CREATE_TABLE";if(take("IF")){need("NOT");need("EXISTS");s.if_not_exists=true;}s.table=identifier();need("(");do{if(take("PRIMARY")){need("KEY");auto ns=name_list();s.table_constraints.push_back({{"columns",ns},{"kind","primary"}});}else if(take("UNIQUE")){auto ns=name_list();s.table_constraints.push_back({{"columns",ns},{"kind","unique"}});}else if(table_integrity())s.table_constraints.push_back(integrity_constraint());else s.columns.push_back(column_def(s.table_constraints));}while(take(","));need(")");bool org_seen=false,record_seen=false,cluster_seen=false;while(is("ORGANIZATION")||is("RECORD")||is("CLUSTER")){if(take("CLUSTER")){if(cluster_seen)fail("DUPLICATE_OPTION","Duplicate cluster clause");cluster_seen=true;s.cluster_name=identifier();s.cluster_columns=name_list();}else if(take("ORGANIZATION")){if(org_seen)fail("DUPLICATE_OPTION","Duplicate organization");org_seen=true;s.organization=organization_spec();}else{need("RECORD");if(record_seen)fail("DUPLICATE_OPTION","Duplicate record format");record_seen=true;record_spec(s);}}}
             else{need("INDEX");s.kind="CREATE_INDEX";if(take("IF")){need("NOT");need("EXISTS");s.if_not_exists=true;}s.index=identifier();need("ON");s.table=identifier();if(take("USING"))s.method=method_name();s.index_columns=name_list();s.column=s.index_columns[0];if(take("USING"))s.method=method_name();if(take("INCLUDE"))s.include_columns=name_list();s.options=method_options();}
         } else if(take("DROP")){
             if(take("MATERIALIZED")){need("VIEW");s.kind="DROP_MATERIALIZED_VIEW";if(take("IF")){need("EXISTS");s.if_exists=true;}s.table=identifier();}
+            else if(take("STATISTICS")){
+                s.kind="DROP_STATISTICS";if(take("IF")){need("EXISTS");s.if_exists=true;}s.index=identifier();
+            }
             else if(take("CLUSTER")){s.kind="DROP_CLUSTER";if(take("IF")){need("EXISTS");s.if_exists=true;}s.cluster_name=identifier();}
             else if(take("TABLE")){s.kind="DROP_TABLE";if(take("IF")){need("EXISTS");s.if_exists=true;}s.table=identifier();}else{need("INDEX");s.kind="DROP_INDEX";if(take("IF")){need("EXISTS");s.if_exists=true;}s.index=identifier();}
         } else if(take("REFRESH")){need("MATERIALIZED");need("VIEW");s.kind="REFRESH_MATERIALIZED_VIEW";s.table=identifier();
@@ -396,8 +432,8 @@ public:
             else if(take("NO")){need("CLUSTER");s.action="NO_CLUSTER";}
             else if(take("RECORD")){s.action="RECORD_FORMAT";record_spec(s);}
             else if(take("ORGANIZATION")){s.action="ORGANIZATION";s.organization=organization_spec();}
-            else if(take("ADD")){take("COLUMN");s.action="ADD";s.columns.push_back(column_def());}
-            else if(take("DROP")){take("COLUMN");s.action="DROP";s.column=identifier();}
+            else if(take("ADD")){if(table_integrity()){s.action="ADD_CONSTRAINT";s.table_constraints.push_back(integrity_constraint());}else{take("COLUMN");s.action="ADD";s.columns.push_back(column_def(s.table_constraints));}}
+            else if(take("DROP")){if(take("CONSTRAINT")){s.action="DROP_CONSTRAINT";s.column=identifier();}else{take("COLUMN");s.action="DROP";s.column=identifier();}}
             else if(take("RENAME")){if(take("TO")){s.action="RENAME_TABLE";s.newname=identifier();}else{take("COLUMN");s.action="RENAME_COLUMN";s.column=identifier();need("TO");s.newname=identifier();}}
             else fail("UNSUPPORTED_SQL","ALTER TABLE supports ADD/DROP/RENAME COLUMN and RENAME TO",t().pos);
         } else if(take("REORGANIZE")){take("TABLE");s.kind="REORGANIZE";s.table=identifier();if(take("ORGANIZATION"))s.organization=organization_spec();else s.organization=nullptr;
@@ -430,7 +466,7 @@ public:
         else if(take("CHECKPOINT"))s.kind="CHECKPOINT";
         else if(take("VERIFY"))s.kind="VERIFY";
         else if(take("TRUNCATE")){take("TABLE");s.kind="TRUNCATE";s.table=identifier();}
-        else if(take("SHOW")){if(take("RECOVERY"))s.kind="SHOW_RECOVERY";else if(take("MATERIALIZED")){need("VIEWS");s.kind="SHOW_MATERIALIZED_VIEWS";}else if(take("CLUSTERS"))s.kind="SHOW_CLUSTERS";else if(take("BUFFER"))s.kind="SHOW_BUFFER";else if(take("MEDIA"))s.kind="SHOW_MEDIA";else if(take("TRANSACTIONS"))s.kind="SHOW_TRANSACTIONS";else if(take("LOCKS"))s.kind="SHOW_LOCKS";else if(take("WAL")){s.kind=take("RECORDS")?"SHOW_WAL_RECORDS":"SHOW_WAL";if(s.kind=="SHOW_WAL_RECORDS"&&take("LIMIT"))s.limit=count();}else if(take("TABLES"))s.kind="SHOW_TABLES";else{need("INDEXES");need("FROM");s.kind="SHOW_INDEXES";s.table=identifier();}}
+        else if(take("SHOW")){if(take("STATISTICS")){need("FROM");s.kind="SHOW_STATISTICS";s.table=identifier();}else if(take("RECOVERY"))s.kind="SHOW_RECOVERY";else if(take("MATERIALIZED")){need("VIEWS");s.kind="SHOW_MATERIALIZED_VIEWS";}else if(take("CLUSTERS"))s.kind="SHOW_CLUSTERS";else if(take("BUFFER"))s.kind="SHOW_BUFFER";else if(take("MEDIA"))s.kind="SHOW_MEDIA";else if(take("TRANSACTIONS"))s.kind="SHOW_TRANSACTIONS";else if(take("LOCKS"))s.kind="SHOW_LOCKS";else if(take("WAL")){s.kind=take("RECORDS")?"SHOW_WAL_RECORDS":"SHOW_WAL";if(s.kind=="SHOW_WAL_RECORDS"&&take("LIMIT"))s.limit=count();}else if(take("TABLES"))s.kind="SHOW_TABLES";else{need("INDEXES");need("FROM");s.kind="SHOW_INDEXES";s.table=identifier();}}
         else if(take("SCRUB")){need("MEDIA");s.kind="SCRUB_MEDIA";}
         else if(take("DESCRIBE")||take("DESC")){s.kind="DESCRIBE";s.table=identifier();}
         else fail("UNSUPPORTED_SQL","Unsupported or empty SQL statement",t().pos);

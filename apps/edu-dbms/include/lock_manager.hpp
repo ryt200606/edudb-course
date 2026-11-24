@@ -64,7 +64,7 @@ public:
     void set_policy(Policy policy);
     // Hold this permit across Storage.commit. Storage must NEVER call back into
     // this manager. Mark the outcome before release(tx). No check-then-wound gap.
-    CommitPermit prepare_commit(std::uint64_t tx);
+    CommitPermit prepare_commit(std::uint64_t tx,bool parallel_admission=false);
     void commit_succeeded(CommitPermit& permit);
     void commit_failed(CommitPermit& permit,bool outcome_unknown);
     // Independent schema/catalog locks remain flat. Data hierarchy registration

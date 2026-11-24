@@ -22,6 +22,9 @@ IoOwnerScope::IoOwnerScope(const std::filesystem::path& directory):previous_(act
 IoOwnerScope::~IoOwnerScope() noexcept{active_owner=previous_;}
 IoScope::IoScope(std::string purpose):previous_(scope),purpose_(std::move(purpose)){scope=this;}
 IoScope::~IoScope(){scope=previous_;}
+IoScope* IoRequestBinding::current() noexcept{return scope;}
+IoRequestBinding::IoRequestBinding(IoScope* target) noexcept:previous_(scope){scope=target;}
+IoRequestBinding::~IoRequestBinding() noexcept{scope=previous_;}
 void IoScope::record(std::size_t role,const std::string& op,std::uint64_t bytes,std::uint64_t ns,bool failed,const std::filesystem::path& path,std::uint64_t offset){add(counters_[role],op,bytes,ns,failed);++trace_total_;if(trace_.size()<8192)trace_.push_back({{"role",roles[role]},{"operation",op},{"file",path.filename().u8string()},{"offset",offset},{"bytes",bytes},{"duration_ns",ns},{"failed",failed}});}
 json IoScope::snapshot()const{return {{"scope",purpose_},{"measurement","operating-system file calls; not physical media I/O"},{"files",describe(counters_)},{"trace",trace_},{"trace_total",trace_total_},{"trace_truncated",trace_total_>trace_.size()}};}
 void io_record(const std::filesystem::path& path,const std::string& op,std::uint64_t bytes,std::uint64_t ns,bool failed,std::uint64_t offset){auto role=role_of(path);{std::lock_guard<std::mutex> l(metrics_mutex);add(metrics[active_owner?active_owner->owner_:group(path.parent_path())][role],op,bytes,ns,failed);}if(scope)scope->record(role,op,bytes,ns,failed,path,offset);}

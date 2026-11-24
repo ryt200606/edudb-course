@@ -1,5 +1,7 @@
 // Query binding, planning and execution. Included within Engine::Impl.
 
+#include "sql_statistics_ddl.inc"
+
 json analyze(Session& session,Statement& statement){
     QueryBudget budget(query_limits);budget.cancellation=locks.cancellation_token(session.tx->id);QueryBudgetScope scope(budget);
     PageProgressScope page_scope([&]{budget.work();budget.check_time();});
@@ -34,6 +36,7 @@ json analyze(Session& session,Statement& statement){
         std::size_t bucket=0;for(std::size_t k=0;k<counts.size();++k){bucket+=counts[k].second;if(bucket>=std::max<std::size_t>(1,values.size()/target)||k+1==counts.size()){hist.push_back({{"upper",counts[k].first},{"frequency",bucket/denominator}});bucket=0;}}
         stats["columns"].push_back({{"column_id",i},{"name",metadata["columns"][i]["name"]},{"null_count",c.nulls},{"ndv",blob?json(nullptr):json(ndv)},{"ndv_exact",rows==sample.size()&&!blob},{"min",c.minimum},{"max",c.maximum},{"mcv",mcv},{"histogram",hist},{"type",metadata["columns"][i]["type"]}});
     }
+    collect_joint_statistics(metadata,sample,target,rows,stats,memory);
     storage.set_statistics(session.tx,statement.table,stats);auto result=blank_result();result["columns"]={{{"name","table"},{"type","VARCHAR"}},{{"name","rows"},{"type","INTEGER"}},{{"name","sample_rows"},{"type","INTEGER"}}};result["rows"].push_back(json::array({statement.table,rows,sample.size()}));result["statistics"]=stats;result["plan"]={{"node","Analyze"},{"table",statement.table},{"full_scan_rows",rows},{"sample_rows",sample.size()},{"memory_bytes_estimate",sample_bytes}};return result;
 }
 

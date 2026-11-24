@@ -16,10 +16,18 @@
 #include <set>
 #include <thread>
 #include <vector>
+#ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
 #include <windows.h>
+#else
+#include <cerrno>
+#include <fcntl.h>
+#include <sys/file.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 namespace edudb::logical {
 namespace {
 namespace fs=std::filesystem;using Clock=std::chrono::steady_clock;

@@ -61,6 +61,9 @@ struct StorageOptions {
     // Internal native-test override. Production leaves empty for LocalAppData.
     std::string fencing_directory;
     std::function<void(const char*)> recovery_phase_hook;
+    // 1 preserves individual sync. Batches never contain overlapping page writes.
+    unsigned wal_group_size=1;
+    unsigned wal_group_wait_us=500;
 };
 // Format-3 table interchange preserves typed rows, stable row_ids, physical
 // organization, and index definitions (method/columns/INCLUDE/options).
@@ -69,6 +72,7 @@ struct StorageOptions {
 class Storage {
 public:
     static json migrate_v2(const std::string& source, const std::string& destination);
+    static json migrate_v4(const std::string& source,const std::string& destination);
     static json migrate_v3(const std::string& source, const std::string& destination);
     Storage(const std::string& directory, std::size_t frames = 128,
             std::size_t private_limit = 32u * 1024u * 1024u,
@@ -87,6 +91,7 @@ public:
     json schema_features(const std::shared_ptr<Transaction>& tx);
     json read_table(const std::shared_ptr<Transaction>& tx, const std::string& name,
                     bool include_rows = true, bool include_physical = true);
+    void set_statistics_definitions(const std::shared_ptr<Transaction>& tx, const std::string& table, const json& definitions);
     void set_statistics(const std::shared_ptr<Transaction>& tx, const std::string& name, const json& statistics);
     void enable_changefeed(const std::shared_ptr<Transaction>& tx, const std::vector<std::string>& tables);
     json read_changefeed(const std::shared_ptr<Transaction>& tx, const std::string& table = "", std::uint64_t after_seq = 0);
@@ -132,6 +137,9 @@ public:
     json become_standby(int timeout_ms=5000);
     json replay_archive(const std::string& manifest,int timeout_ms=5000,bool validate_only=false);
     json promote(int timeout_ms=5000);
+    json handoff_offer(const std::string& key);
+    json handoff_surrender(const json& offer,const std::string& key);
+    json handoff_accept(const json& ticket,const std::string& key);
     json recovery_identity();
     json checkpoint(int timeout_ms = 5000);
 private:

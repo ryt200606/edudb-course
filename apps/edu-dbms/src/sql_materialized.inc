@@ -42,9 +42,9 @@ void materialized_prepare(Session& session,const std::vector<std::string>& chang
         if(metadata["materialized_view"].value("delta",json::object()).value("eligible",false))storage.enable_changefeed(session.tx,affected);
     }
 }
-void materialized_write_guard(Session& session,const std::string& target){
+void materialized_write_guard(Session& session,const std::string& target,json* directory=nullptr){
     if(materialized_refresh_active()||!exists(session,target))return;
-    const auto features=storage.schema_features(session.tx);const auto metadata=features.value(target,json::object());
+    const auto features=storage.schema_features(session.tx);if(directory)*directory=features;const auto metadata=features.value(target,json::object());
     if(metadata.contains("materialized_aux"))fail("READ_ONLY_MATERIALIZED_VIEW","Direct writes to persistent aggregate state are not allowed");
     if(materialized_metadata(metadata))fail("READ_ONLY_MATERIALIZED_VIEW","Use REFRESH MATERIALIZED VIEW; direct DML/CSV writes are not allowed: "+target);
     materialized_prepare(session,{target});

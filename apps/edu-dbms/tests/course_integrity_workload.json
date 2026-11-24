@@ -1,0 +1,195 @@
+[
+  {
+    "case": "create student",
+    "sql": "CREATE TABLE ci_student(id BIGINT PRIMARY KEY, name VARCHAR(24) NOT NULL)"
+  },
+  {
+    "case": "create course",
+    "sql": "CREATE TABLE ci_course(term INTEGER, code VARCHAR(8), title VARCHAR(24) UNIQUE, PRIMARY KEY(term,code))"
+  },
+  {
+    "case": "create junction",
+    "sql": "CREATE TABLE ci_enrol(sid BIGINT, term INTEGER, code VARCHAR(8), mark INTEGER, PRIMARY KEY(sid,term,code), CONSTRAINT ci_score CHECK(mark>=0 AND mark<=100), CONSTRAINT ci_fk_s FOREIGN KEY(sid) REFERENCES ci_student(id) ON DELETE CASCADE, CONSTRAINT ci_fk_c FOREIGN KEY(term,code) REFERENCES ci_course(term,code) ON DELETE RESTRICT)"
+  },
+  {
+    "case": "empty aggregate",
+    "sql": "SELECT COUNT(*) FROM ci_enrol",
+    "expected_rows": [
+      [
+        0
+      ]
+    ]
+  },
+  {
+    "case": "unicode and bigints",
+    "sql": "INSERT INTO ci_student VALUES(1,'任同学'),(2,'李同学'),(9007199254740993,'陈同学')"
+  },
+  {
+    "case": "course rows",
+    "sql": "INSERT INTO ci_course VALUES(1,'db','数据库'),(1,'os','操作系统')"
+  },
+  {
+    "case": "real and missing marks",
+    "sql": "INSERT INTO ci_enrol VALUES(1,1,'db',90),(2,1,'db',NULL),(9007199254740993,1,'os',90)"
+  },
+  {
+    "case": "duplicate",
+    "sql": "INSERT INTO ci_enrol VALUES(1,1,'db',89)",
+    "expected_error": "UNIQUE_VIOLATION",
+    "pg_sqlstate": "23505"
+  },
+  {
+    "case": "foreign prevents whole statement",
+    "sql": "INSERT INTO ci_enrol VALUES(1,1,'os',98),(999,1,'db',65)",
+    "expected_error": "FOREIGN_KEY_VIOLATION",
+    "pg_sqlstate": "23503"
+  },
+  {
+    "case": "mark domain",
+    "sql": "UPDATE ci_enrol SET mark=101 WHERE sid=1",
+    "expected_error": "CHECK_VIOLATION",
+    "pg_sqlstate": "23514"
+  },
+  {
+    "case": "non-null",
+    "sql": "INSERT INTO ci_student VALUES(5,NULL)",
+    "expected_error": "NOT_NULL_VIOLATION",
+    "pg_sqlstate": "23502"
+  },
+  {
+    "case": "sorted join with exact 64-bit keys",
+    "sql": "SELECT e.sid,s.name,c.title,e.mark FROM ci_enrol e JOIN ci_student s ON e.sid=s.id JOIN ci_course c ON e.term=c.term AND e.code=c.code ORDER BY e.sid",
+    "expected_rows": [
+      [
+        1,
+        "任同学",
+        "数据库",
+        90
+      ],
+      [
+        2,
+        "李同学",
+        "数据库",
+        null
+      ],
+      [
+        9007199254740993,
+        "陈同学",
+        "操作系统",
+        90
+      ]
+    ]
+  },
+  {
+    "case": "aggregate ignores null",
+    "sql": "SELECT code,COUNT(*),COUNT(mark),SUM(mark) FROM ci_enrol GROUP BY code ORDER BY code",
+    "expected_rows": [
+      [
+        "db",
+        2,
+        1,
+        90
+      ],
+      [
+        "os",
+        1,
+        1,
+        90
+      ]
+    ]
+  },
+  {
+    "case": "deterministic tied pagination",
+    "sql": "SELECT sid FROM ci_enrol WHERE mark=90 ORDER BY mark,sid LIMIT 1 OFFSET 1",
+    "expected_rows": [
+      [
+        9007199254740993
+      ]
+    ]
+  },
+  {
+    "case": "begin",
+    "sql": "BEGIN"
+  },
+  {
+    "case": "cascade inside txn",
+    "sql": "DELETE FROM ci_student WHERE id=1"
+  },
+  {
+    "case": "within txn visible",
+    "sql": "SELECT COUNT(*) FROM ci_enrol",
+    "expected_rows": [
+      [
+        2
+      ]
+    ]
+  },
+  {
+    "case": "rollback",
+    "sql": "ROLLBACK"
+  },
+  {
+    "case": "after rollback",
+    "sql": "SELECT COUNT(*) FROM ci_enrol",
+    "expected_rows": [
+      [
+        3
+      ]
+    ]
+  },
+  {
+    "case": "alter add",
+    "sql": "ALTER TABLE ci_student ADD COLUMN enabled BOOLEAN DEFAULT TRUE"
+  },
+  {
+    "case": "alter rename",
+    "sql": "ALTER TABLE ci_student RENAME COLUMN enabled TO active"
+  },
+  {
+    "case": "alter old rows",
+    "sql": "SELECT COUNT(*) FROM ci_student WHERE active=TRUE",
+    "expected_rows": [
+      [
+        3
+      ]
+    ]
+  },
+  {
+    "case": "alter drop",
+    "sql": "ALTER TABLE ci_student DROP COLUMN active"
+  },
+  {
+    "case": "restricted parent",
+    "sql": "DELETE FROM ci_course WHERE code='db'",
+    "expected_error": "FOREIGN_KEY_VIOLATION",
+    "pg_sqlstate": "23503"
+  },
+  {
+    "case": "allowed update",
+    "sql": "UPDATE ci_enrol SET mark=100 WHERE sid=2"
+  },
+  {
+    "case": "final rows",
+    "sql": "SELECT sid,term,code,mark FROM ci_enrol ORDER BY sid",
+    "expected_rows": [
+      [
+        1,
+        1,
+        "db",
+        90
+      ],
+      [
+        2,
+        1,
+        "db",
+        100
+      ],
+      [
+        9007199254740993,
+        1,
+        "os",
+        90
+      ]
+    ]
+  }
+]

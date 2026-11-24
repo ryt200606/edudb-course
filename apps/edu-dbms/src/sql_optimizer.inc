@@ -13,14 +13,9 @@ const json* column_statistics(const json& table,int column){
 }
 double clamp_probability(double p){return std::max(0.0,std::min(1.0,p));}
 struct EstimatedTruth{double t=1,u=0;};
-EstimatedTruth estimate_truth(const json& table,const json& p){
-    if(p.is_null())return {};
+#include "sql_joint_statistics.inc"
+EstimatedTruth estimate_scalar_truth(const json& table,const json& p){
     const auto op=p.value("op",std::string());
-    if(p.contains("args")){
-        if(op=="NOT"){auto a=estimate_truth(table,p["args"][0]);return {clamp_probability(1-a.t-a.u),a.u};}
-        EstimatedTruth out=op=="AND"?EstimatedTruth{}:EstimatedTruth{0,0};
-        for(const auto& a:p["args"]){auto b=estimate_truth(table,a);double f=1-out.t-out.u,g=1-b.t-b.u;double t=op=="AND"?out.t*b.t:out.t+b.t-out.t*b.t;double z=op=="AND"?f+g-f*g:f*g;out={clamp_probability(t),clamp_probability(1-t-z)};}return out;
-    }
     const auto* s=column_statistics(table,p.value("column",-1));double rows=table.value("row_count",0.0);
     const double nulls=s&&rows?clamp_probability(s->value("null_count",0.0)/rows):0.05;
     if(op=="IS NULL")return {nulls,0};
@@ -43,6 +38,52 @@ EstimatedTruth estimate_truth(const json& table,const json& p){
     }
     double t=op=="<"?less:op=="<="?less+equal:op==">"?1-nulls-less-equal:1-nulls-less;
     return {clamp_probability(t),nulls};
+}
+void estimation_conjuncts(const json& expression,std::vector<const json*>& leaves){
+    if(expression.value("op",std::string())=="AND"){
+        for(const auto& child:expression.at("args"))estimation_conjuncts(child,leaves);
+    }else leaves.push_back(&expression);
+}
+EstimatedTruth estimate_truth(const json& table,const json& p,std::set<std::string>* used=nullptr){
+    if(p.is_null())return {};
+    if(!p.contains("args"))return estimate_scalar_truth(table,p);
+    const auto& op=p.at("op");
+    if(op=="NOT"){
+        auto a=estimate_truth(table,p.at("args")[0],used);
+        return {clamp_probability(1-a.t-a.u),a.u};
+    }
+    if(op=="OR"){
+        EstimatedTruth out{0,0};
+        for(const auto& child:p.at("args"))out=combine_estimates(out,estimate_truth(table,child,used),false);
+        return out;
+    }
+    std::vector<const json*> leaves;
+    estimation_conjuncts(p,leaves);
+    std::vector<bool> taken(leaves.size());
+    EstimatedTruth out{};
+    if(table.contains("statistics")&&table.at("statistics").is_object()){
+        const auto& stats=table.at("statistics");
+        if(!stats.value("stale",false)&&stats.contains("joint_mcv")){
+            for(const auto& item:stats.at("joint_mcv").items()){
+                const auto& info=item.value();
+                std::array<std::size_t,2> match={leaves.size(),leaves.size()};
+                for(std::size_t i=0;i<leaves.size();++i){
+                    if(taken[i]||!leaves[i]->contains("column"))continue;
+                    for(int j=0;j<2;++j)
+                        if(leaves[i]->at("column")==info.at("column_ids")[j]&&
+                           (match[j]==leaves.size()||*leaves[i]<*leaves[match[j]]))match[j]=i;
+                }
+                if(match[0]==leaves.size()||match[1]==leaves.size())continue;
+                const auto& a=*leaves[match[0]];const auto& b=*leaves[match[1]];
+                auto pair=joint_truth(info,a,b,estimate_scalar_truth(table,a),estimate_scalar_truth(table,b),stats.value("sampled",false));
+                out=combine_estimates(out,pair,true);taken[match[0]]=taken[match[1]]=true;
+                if(used)used->insert(item.key());
+            }
+        }
+    }
+    for(std::size_t i=0;i<leaves.size();++i)if(!taken[i])
+        out=combine_estimates(out,estimate_truth(table,*leaves[i],used),true);
+    return out;
 }
 double estimate_ndv(const json& table,int column,double filtered_rows){
     const auto* s=column_statistics(table,column);double n=s?s->value("ndv",16.0):std::max(1.0,table.value("row_count",0.0)/16);

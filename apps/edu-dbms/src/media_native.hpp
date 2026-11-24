@@ -15,6 +15,8 @@
 #else
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <sys/file.h>
+#include "portable_sha256.hpp"
 #include <unistd.h>
 #endif
 
@@ -39,7 +41,12 @@ public:
 #else
         fd_=::open(path_.c_str(),O_RDWR|(create?O_CREAT:0)|(create_new?(O_EXCL|O_CREAT):0),0600);
         if(fd_<0)fail("MEDIA_IO","Open member/control file failed: "+path_.u8string());
-        (void)exclusive;
+        if(exclusive && ::flock(fd_,LOCK_EX | LOCK_NB)!=0){
+            const int error=errno;
+            ::close(fd_);fd_=-1;
+            fail(error==EWOULDBLOCK ? "MEDIA_LOCKED" : "MEDIA_IO",
+                 "Cannot acquire exclusive file lease: "+path_.u8string());
+        }
 #endif
     }
     ~File(){

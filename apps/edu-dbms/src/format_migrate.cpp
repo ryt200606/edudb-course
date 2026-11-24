@@ -31,9 +31,9 @@ json compare(const DatabaseImage& original,const fs::path& destination){Storage 
 void inject(const char* phase){const char* chosen=std::getenv("EDUDB_TEST_MIGRATE_V3_FAIL");if(chosen&&std::string(chosen)==phase)throw DbError("MIGRATION_TEST_FAILURE",std::string("Controlled migration failure at ")+phase);}
 StorageOptions options_from(const json& c){StorageOptions result;result.recovery_mode=c.value("recovery_mode",std::string("REDO_PRIVATE"));if(result.recovery_mode=="ARIES_PAGE"){result.aries_steal=c.value("aries_steal",true);result.aries_force_at_commit=c.value("aries_force_at_commit",false);}auto layout=c.value("data_layout",json{{"kind","single"}});if(layout.value("kind",std::string())=="managed"){result.data_layout=layout.at("layout").get<std::string>();result.media_members=layout.at("members").get<std::size_t>();}return result;}
 }
-json Storage::migrate_v3(const std::string& source,const std::string& destination){
+static json migrate_catalog(const std::string& source,const std::string& destination,int version){
     format_copy::Destination target(fs::u8path(destination));
-    format_copy::LegacySnapshot snapshot(fs::u8path(source),target.parent(),{},&target);snapshot.promote_owned_copy();inject("after_copy");
+    format_copy::LegacySnapshot snapshot(fs::u8path(source),target.parent(),{},&target,version);if(version==3)snapshot.promote_owned_copy();inject("after_copy");
     auto options=options_from(snapshot.control());std::string sql;
     {Engine input(snapshot.path().u8string());auto sid=input.open_session();auto exported=input.export_data(sid,{{"format","sql"}});input.close_session(sid);if(!exported.value("ok",false))throw DbError("MIGRATION_EXPORT",exported.at("error").dump());sql=exported.at("content").get<std::string>();}
     inject("after_export");const auto original=capture(snapshot.path());if(original.uuid!=snapshot.control().at("uuid").get<std::string>())throw DbError("MIGRATION_VERIFY","Recovered source-copy UUID changed");
@@ -42,8 +42,10 @@ json Storage::migrate_v3(const std::string& source,const std::string& destinatio
     inject("after_import");json first=compare(original,staging.path());std::string fresh_uuid;
     {Storage reopened(staging.path().u8string());fresh_uuid=reopened.query_workspace().second;if(fresh_uuid==original.uuid)throw DbError("MIGRATION_VERIFY","New UUID must differ from original");reopened.checkpoint();}
     auto second=compare(original,staging.path());if(first!=second)throw DbError("MIGRATION_VERIFY","Offline reopen verification differs");snapshot.verify_source_unchanged();auto c=format_copy::read_control(staging.path()/"control.json");if(c.value("version",0)!=4||c.value("page_format",0)!=3)throw DbError("MIGRATION_VERIFY","Target control/page formats differ");
-    json receipt={{"status","PASS"},{"source",snapshot.source().u8string()},{"destination",target.path().u8string()},{"source_format",3},{"destination_format",4},{"page_format",3},{"source_uuid",original.uuid},{"destination_uuid",fresh_uuid},{"source_unchanged",true},{"source_files",snapshot.source_files()},{"logical_sql_sha256",format_copy::sha256(sql)},{"logical_sql_bytes",sql.size()},{"tables",second},{"recovery_mode",c.at("recovery_mode")},{"data_layout",c.at("data_layout")},{"validation","independent native structure plus complete typed row bag; checkpoint, close and offline reopen"},{"power_loss","NOT_RUN"}};
-    {std::ofstream out(staging.path()/"migration-v3-receipt.json",std::ios::binary);out<<receipt.dump(2);out.flush();if(!out)throw DbError("MIGRATION_IO","Cannot write owned migration receipt");}
+    json receipt={{"status","PASS"},{"source",snapshot.source().u8string()},{"destination",target.path().u8string()},{"source_format",version},{"source_minimum_reader",snapshot.control().value("minimum_reader_format",version)},{"destination_format",4},{"destination_minimum_reader",c.at("minimum_reader_format")},{"page_format",3},{"source_uuid",original.uuid},{"destination_uuid",fresh_uuid},{"source_unchanged",true},{"source_files",snapshot.source_files()},{"logical_sql_sha256",format_copy::sha256(sql)},{"logical_sql_bytes",sql.size()},{"tables",second},{"recovery_mode",c.at("recovery_mode")},{"data_layout",c.at("data_layout")},{"validation","independent native structure plus complete typed row bag; checkpoint, close and offline reopen"},{"power_loss","NOT_RUN"}};
+    {std::ofstream out(staging.path()/("migration-v"+std::to_string(version)+"-receipt.json"),std::ios::binary);out<<receipt.dump(2);out.flush();if(!out)throw DbError("MIGRATION_IO","Cannot write owned migration receipt");}
     inject("before_publish");snapshot.verify_source_unchanged();staging.publish(target);return receipt;
 }
+json Storage::migrate_v3(const std::string& source,const std::string& destination){return migrate_catalog(source,destination,3);}
+json Storage::migrate_v4(const std::string& source,const std::string& destination){return migrate_catalog(source,destination,4);}
 }

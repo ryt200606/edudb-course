@@ -59,14 +59,14 @@ public:
 class Sha256 {
 #ifdef _WIN32
     HCRYPTPROV provider_=0;HCRYPTHASH hash_=0;
+#else
+    PortableSha256 hash_;
 #endif
 public:
     Sha256(){
 #ifdef _WIN32
         if(!CryptAcquireContextW(&provider_,nullptr,nullptr,PROV_RSA_AES,CRYPT_VERIFYCONTEXT))fail("BACKUP_HASH","SHA256 provider unavailable");
         if(!CryptCreateHash(provider_,CALG_SHA_256,0,0,&hash_)){CryptReleaseContext(provider_,0);provider_=0;fail("BACKUP_HASH","SHA256 context unavailable");}
-#else
-        fail("NOT_SUPPORTED","This stage's native SHA256 implementation is Windows only");
 #endif
     }
     ~Sha256(){
@@ -79,14 +79,14 @@ public:
 #ifdef _WIN32
         while(size){auto n=static_cast<DWORD>(std::min<std::size_t>(size,1u<<28));if(!CryptHashData(hash_,p,n,0))fail("BACKUP_HASH","SHA256 update failed");p+=n;size-=n;}
 #else
-        (void)p;(void)size;
+        hash_.add(reinterpret_cast<const char*>(p),size);
 #endif
     }
     std::string finish(){
 #ifdef _WIN32
         unsigned char bytes[32];DWORD size=32;if(!CryptGetHashParam(hash_,HP_HASHVAL,bytes,&size,0)||size!=32)fail("BACKUP_HASH","SHA256 finish failed");static constexpr char digits[]="0123456789abcdef";std::string text;for(auto b:bytes){text+=digits[b>>4];text+=digits[b&15];}return text;
 #else
-        return {};
+        return hash_.finish();
 #endif
     }
 };

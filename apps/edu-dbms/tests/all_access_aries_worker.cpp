@@ -1,3 +1,4 @@
+#include "test_platform.hpp"
 // Windows SQL/recovery worker; the parent runner binds current source and linked core SHA.
 // All data changes below use actual Engine SQL; native Storage is read-only verification.
 #include "edudb.hpp"
@@ -10,9 +11,6 @@
 #include <map>
 #include <string>
 #include <thread>
-#ifdef _WIN32
-#include <windows.h>
-#endif
 using namespace edudb;
 namespace fs=std::filesystem;
 using Model=std::map<std::string,std::map<long long,json>>;
@@ -91,7 +89,7 @@ int main(int argc,char** argv){std::string mode=argc>1?argv[1]:"",dir=argc>2?arg
  }else if(mode=="recover-base"||mode=="recover-commit"){
   bool changed=mode=="recover-commit";{Engine e(dir,16,32u*1024u*1024u,opts());result["startup_diagnostics"]=e.diagnostics();auto sid=e.open_session();result["snapshot"]=check_all(e,sid,model(changed));result["diagnostics"]=e.diagnostics();e.close_session(sid);}result["physical_lobs"]=native_lobs(dir,changed);
  }else if(mode=="hold-commit"||mode=="hold-loser"){
-  Engine e(dir,16,32u*1024u*1024u,opts());auto sid=e.open_session();auto before=e.diagnostics();sql(e,sid,"BEGIN");mutate(e,sid);if(mode=="hold-commit")sql(e,sid,"COMMIT");auto diag=e.diagnostics();require(diag.at("storage").at("steal_flushes").get<unsigned>()>before.at("storage").at("steal_flushes").get<unsigned>(),"actual STEAL dirty writes before crash");result["diagnostics"]=diag;result["pid"]=GetCurrentProcessId();result["checks"]=checks;result["events"]=events;result["status"]="READY_FOR_EXTERNAL_TERMINATE";write(fs::u8path(receipt),result);for(int n=0;n<120;++n)std::this_thread::sleep_for(std::chrono::seconds(1));throw std::runtime_error("external kill did not arrive within120s");
+  Engine e(dir,16,32u*1024u*1024u,opts());auto sid=e.open_session();auto before=e.diagnostics();sql(e,sid,"BEGIN");mutate(e,sid);if(mode=="hold-commit")sql(e,sid,"COMMIT");auto diag=e.diagnostics();require(diag.at("storage").at("steal_flushes").get<unsigned>()>before.at("storage").at("steal_flushes").get<unsigned>(),"actual STEAL dirty writes before crash");result["diagnostics"]=diag;result["pid"]=edudb_test::process_id();result["checks"]=checks;result["events"]=events;result["status"]="READY_FOR_EXTERNAL_TERMINATE";write(fs::u8path(receipt),result);for(int n=0;n<120;++n)std::this_thread::sleep_for(std::chrono::seconds(1));throw std::runtime_error("external kill did not arrive within120s");
  }else throw std::runtime_error("unknown mode");
  result["checks"]=checks;result["events"]=events;result["status"]="PASS";write(fs::u8path(receipt),result);std::cout<<"PASS "<<mode<<" checks="<<checks<<"\n";return 0;
  }catch(const std::exception& e){json fail={{"status","FAIL"},{"mode",mode},{"error",e.what()},{"checks",checks},{"events",events}};if(auto p=dynamic_cast<const DbError*>(&e))fail["code"]=p->code;try{write(fs::u8path(receipt),fail);}catch(...){}std::cerr<<"FAIL "<<mode<<" "<<e.what()<<"\n";return 1;}}

@@ -1,3 +1,4 @@
+#include "test_platform.hpp"
 #include "edudb.hpp"
 #include <atomic>
 #include <chrono>
@@ -7,7 +8,6 @@
 #include <iostream>
 #include <mutex>
 #include <thread>
-#include <windows.h>
 using namespace edudb;
 namespace fs=std::filesystem;
 static std::atomic<unsigned> checks{0};
@@ -54,18 +54,18 @@ static void exercise(const fs::path& dir,json& evidence){
  evidence["final_diagnostics"]=e.diagnostics();
 }
 static void resources(const fs::path& dir,json& evidence){
- _putenv_s("EDUDB_HISTORY_LIMIT_BYTES","8192");
+ edudb_test::set_env("EDUDB_HISTORY_LIMIT_BYTES","8192");
  {Engine e(dir.u8string(),8);auto setup=e.open_session();run(e,setup,"CREATE TABLE t(id INTEGER PRIMARY KEY,v INTEGER)");run(e,setup,"INSERT INTO t VALUES(1,10)");e.close_session(setup);auto ro=e.open_session(),w=e.open_session();begin(e,ro,true);val(e,ro,10);begin(e,w);run(e,w,"UPDATE t SET v=99 WHERE id=1");auto before=e.diagnostics().at("storage").at("wal_bytes");error(e,w,"COMMIT","VERSION_HISTORY_LIMIT");auto after=e.diagnostics();need(after.at("storage").at("wal_bytes")==before,"history budget rejected before WAL append/force");val(e,ro,10);run(e,w,"ROLLBACK");run(e,ro,"COMMIT");begin(e,w);run(e,w,"UPDATE t SET v=11 WHERE id=1");run(e,w,"COMMIT");begin(e,w,true);val(e,w,11);run(e,w,"COMMIT");evidence["history_limit_rejection"]=after;e.close_session(ro);e.close_session(w);}
- _putenv_s("EDUDB_HISTORY_LIMIT_BYTES","");
+ edudb_test::set_env("EDUDB_HISTORY_LIMIT_BYTES","");
 }
-int main(int argc,char** argv){fs::path parent=argc>1?fs::u8path(argv[1]):fs::temp_directory_path()/fs::path("edudb-mv2pl-"+std::to_string(GetCurrentProcessId()));std::string mode=argc>2?argv[2]:"normal";fs::path receipt=argc>3?fs::u8path(argv[3]):parent/"result.json";json evidence={{"mode",mode},{"scope","isolated full source build from frozen5ce; no current-main acceptance"}};try{
+int main(int argc,char** argv){fs::path parent=argc>1?fs::u8path(argv[1]):fs::temp_directory_path()/fs::path("edudb-mv2pl-"+std::to_string(edudb_test::process_id()));std::string mode=argc>2?argv[2]:"normal";fs::path receipt=argc>3?fs::u8path(argv[3]):parent/"result.json";json evidence={{"mode",mode},{"scope","isolated full source build from frozen5ce; no current-main acceptance"}};try{
  fs::create_directories(parent);
  if(mode=="normal"){
   need(!fs::exists(parent/"core"),"fresh owned test directory");exercise(parent/"core",evidence);resources(parent/"resource",evidence);
   {StorageOptions o;o.recovery_mode="ARIES_PAGE";Engine e((parent/"aries-reject").u8string(),8,32u*1024u*1024u,o);auto s=e.open_session();error(e,s,"BEGIN PROTOCOL MV2PL READ ONLY","ARIES_PROTOCOL");e.close_session(s);}
   {Engine e((parent/"core").u8string(),8);auto s=e.open_session();begin(e,s,true);val(e,s,13);val(e,s,41,"ca");val(e,s,51,"cb");run(e,s,"VERIFY");run(e,s,"COMMIT");e.close_session(s);}
  }else if(mode=="hold-commit"||mode=="hold-loser"){
-  Engine e((parent/"core").u8string(),8);auto ro=e.open_session(),w=e.open_session();begin(e,ro,true);val(e,ro,13);begin(e,w);run(e,w,"UPDATE t SET v=77 WHERE id=1");if(mode=="hold-commit")run(e,w,"COMMIT");val(e,ro,13);evidence["pid"]=GetCurrentProcessId();evidence["status"]="READY_FOR_EXTERNAL_TERMINATE";evidence["events"]=events;write(receipt,evidence);for(unsigned i=0;i<120;++i)std::this_thread::sleep_for(std::chrono::seconds(1));throw std::runtime_error("missing external kill");
+  Engine e((parent/"core").u8string(),8);auto ro=e.open_session(),w=e.open_session();begin(e,ro,true);val(e,ro,13);begin(e,w);run(e,w,"UPDATE t SET v=77 WHERE id=1");if(mode=="hold-commit")run(e,w,"COMMIT");val(e,ro,13);evidence["pid"]=edudb_test::process_id();evidence["status"]="READY_FOR_EXTERNAL_TERMINATE";evidence["events"]=events;write(receipt,evidence);for(unsigned i=0;i<120;++i)std::this_thread::sleep_for(std::chrono::seconds(1));throw std::runtime_error("missing external kill");
  }else if(mode=="recover-commit"||mode=="recover-loser"){
   Engine e((parent/"core").u8string(),8);auto s=e.open_session();evidence["startup"]=e.diagnostics();begin(e,s,true);val(e,s,mode=="recover-commit"?77:13);val(e,s,41,"ca");val(e,s,51,"cb");run(e,s,"VERIFY");run(e,s,"COMMIT");e.close_session(s);
  }else throw std::runtime_error("unknown mode");

@@ -15,6 +15,7 @@
 #include "lock_manager.hpp"
 #include "execution_progress.hpp"
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cerrno>
@@ -53,7 +54,7 @@ std::string make_instance_id() {
 } // anonymous namespace
 
 struct Engine::Impl {
-    Storage storage;LockManager locks;
+    Storage storage;LockManager locks;const bool concurrent_commits;
     std::mutex tree_topology_mutex;std::map<std::string,std::weak_ptr<const LockTreeTopology>> tree_topologies;
     const std::string instance=make_instance_id();
     const QueryLimits query_limits=query_limits_from_environment();
@@ -63,6 +64,7 @@ struct Engine::Impl {
     Impl(const std::string& dir,std::size_t frames,std::size_t limit,const StorageOptions& options)
         :storage(dir,frames,limit,options),
          locks(timeout_from_environment("EDUDB_LOCK_TIMEOUT_MS",5000)),
+         concurrent_commits(options.wal_group_size>1),
          idle_timeout(timeout_from_environment("EDUDB_IDLE_TIMEOUT_MS",600000)) {
         reaper=std::thread([this]{
             const auto interval=std::min(std::chrono::milliseconds(100),
@@ -86,11 +88,11 @@ struct Engine::Impl {
     std::string state(const Session& s)const{return s.aborted?"aborted":s.tx?"active":"idle";}
     void rollback(Session& s){if(s.tx){auto id=s.tx->id;try{storage.rollback(s.tx);}catch(...){locks.release(id);s.tree.clear();s.tx.reset();s.explicit_tx=false;s.aborted=false;throw;}locks.release(id);s.tx.reset();}s.tree.clear();s.explicit_tx=false;s.aborted=false;}
     void commit(Session& s){
-        auto tx=s.tx;auto permit=locks.prepare_commit(tx->id);
+        auto tx=s.tx;auto permit=locks.prepare_commit(tx->id,concurrent_commits);
         try{storage.commit(tx);}catch(...){locks.commit_failed(permit,storage.recovery_required());throw;}
         locks.commit_succeeded(permit);locks.release(tx->id);s.tree.clear();s.tx.reset();s.explicit_tx=false;s.aborted=false;
     }
-    static bool schema_statement(const Statement& st){return st.kind=="CREATE_CLUSTER"||st.kind=="DROP_CLUSTER"||st.kind=="CREATE_TABLE"||st.kind=="DROP_TABLE"||st.kind=="ALTER_TABLE"||st.kind=="CREATE_INDEX"||st.kind=="DROP_INDEX"||st.kind=="REINDEX"||st.kind=="REORGANIZE"||st.kind=="CREATE_MATERIALIZED_VIEW"||st.kind=="DROP_MATERIALIZED_VIEW"||st.kind=="REFRESH_MATERIALIZED_VIEW";}
+    static bool schema_statement(const Statement& st){return st.kind=="CREATE_STATISTICS"||st.kind=="DROP_STATISTICS"||st.kind=="CREATE_CLUSTER"||st.kind=="DROP_CLUSTER"||st.kind=="CREATE_TABLE"||st.kind=="DROP_TABLE"||st.kind=="ALTER_TABLE"||st.kind=="CREATE_INDEX"||st.kind=="DROP_INDEX"||st.kind=="REINDEX"||st.kind=="REORGANIZE"||st.kind=="CREATE_MATERIALIZED_VIEW"||st.kind=="DROP_MATERIALIZED_VIEW"||st.kind=="REFRESH_MATERIALIZED_VIEW";}
     static std::string isolation(const TransactionOptions& options){return options.protocol==TransactionProtocol::Snapshot?(options.read_committed?"READ_COMMITTED":"SNAPSHOT"):"SERIALIZABLE";}
     TransactionOptions transaction_options(const json& configuration){
         TransactionOptions options;const bool explicit_protocol=configuration.contains("protocol");
@@ -194,6 +196,7 @@ struct Engine::Impl {
 #include "sql_materialized_delta.inc"
 #include "sql_materialized.inc"
 #include "sql_materialized_rewrite.inc"
+#include "sql_integrity.inc"
 #include "sql_mutation.inc"
 #include "sql_cluster.inc"
 #include "sql_tree.inc"
@@ -222,7 +225,7 @@ json Engine::execute(const std::string& id, const std::string& sql) {
         auto statement = Parser(sql).parse();
         if(impl_->storage.logical_recovery_mode()){
             if(Impl::schema_statement(statement)&&session->explicit_tx)fail("LOGICAL_DDL_AUTOCOMMIT","Logical mode DDL requires its own automatic physical transaction");
-            const std::set<std::string> unavailable={"ALTER_TABLE","REINDEX","REORGANIZE","TRUNCATE","ANALYZE","CREATE_CLUSTER","DROP_CLUSTER","CREATE_MATERIALIZED_VIEW","DROP_MATERIALIZED_VIEW","REFRESH_MATERIALIZED_VIEW"};
+            const std::set<std::string> unavailable={"CREATE_STATISTICS","DROP_STATISTICS","ALTER_TABLE","REINDEX","REORGANIZE","TRUNCATE","ANALYZE","CREATE_CLUSTER","DROP_CLUSTER","CREATE_MATERIALIZED_VIEW","DROP_MATERIALIZED_VIEW","REFRESH_MATERIALIZED_VIEW"};
             if(unavailable.count(statement.kind))fail("LOGICAL_UNSUPPORTED","Command is unavailable in bounded ARIES_LOGICAL experiment mode");
         }
         analyze = statement.analyze;

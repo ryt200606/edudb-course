@@ -1,3 +1,4 @@
+#include "test_platform.hpp"
 #include "edudb.hpp"
 #include "tree_control.hpp"
 #include <chrono>
@@ -8,7 +9,6 @@
 #include <iostream>
 #include <mutex>
 #include <thread>
-#include <windows.h>
 using namespace edudb;namespace fs=std::filesystem;
 static unsigned checks=0;static json events=json::array();static std::mutex event_mutex;
 static void need(bool b,const std::string& m){++checks;if(!b)throw std::runtime_error(m);}
@@ -41,7 +41,7 @@ static void lifecycle(const fs::path& dir,json& proof){
  // Destructor must discard private writes and all node grants.
  {Engine e((dir/"core").u8string(),8);auto s=e.open_session();open(e,s);sql(e,s,"TREE LOCK 2");sql(e,s,"UPDATE t SET v=999 WHERE id=2");}
  {Engine e((dir/"core").u8string(),8);auto s=e.open_session();open(e,s);sql(e,s,"TREE LOCK 2");value(e,s,2,22);sql(e,s,"COMMIT");e.close_session(s);}
- _putenv_s("EDUDB_LOCK_TIMEOUT_MS","60");{Engine e((dir/"timeout").u8string(),8);auto s=e.open_session();sql(e,s,"CREATE TABLE t(id INTEGER PRIMARY KEY,parent INTEGER,v INTEGER)");sql(e,s,"INSERT INTO t VALUES(1,NULL,10),(2,1,20)");e.close_session(s);auto a=e.open_session(),b=e.open_session();open(e,a);sql(e,a,"TREE LOCK 2");open(e,b);error(e,b,"TREE LOCK 2","LOCK_TIMEOUT");proof["actual_node_timeout"]=e.diagnostics();sql(e,b,"ROLLBACK");sql(e,a,"COMMIT");e.close_session(a);e.close_session(b);}_putenv_s("EDUDB_LOCK_TIMEOUT_MS","");
+ edudb_test::set_env("EDUDB_LOCK_TIMEOUT_MS","60");{Engine e((dir/"timeout").u8string(),8);auto s=e.open_session();sql(e,s,"CREATE TABLE t(id INTEGER PRIMARY KEY,parent INTEGER,v INTEGER)");sql(e,s,"INSERT INTO t VALUES(1,NULL,10),(2,1,20)");e.close_session(s);auto a=e.open_session(),b=e.open_session();open(e,a);sql(e,a,"TREE LOCK 2");open(e,b);error(e,b,"TREE LOCK 2","LOCK_TIMEOUT");proof["actual_node_timeout"]=e.diagnostics();sql(e,b,"ROLLBACK");sql(e,a,"COMMIT");e.close_session(a);e.close_session(b);}edudb_test::set_env("EDUDB_LOCK_TIMEOUT_MS","");
 }
 static void normal(const fs::path& path,json& proof){
  exhaustive(proof);Engine e(path.u8string(),8);auto setup=e.open_session();sql(e,setup,"CREATE TABLE t(id INTEGER PRIMARY KEY,parent INTEGER,v INTEGER)");sql(e,setup,"INSERT INTO t VALUES(1,NULL,10),(2,1,20),(3,1,30),(4,2,40),(5,2,50)");sql(e,setup,"CREATE TABLE bad(id INTEGER PRIMARY KEY,parent INTEGER,v INTEGER)");sql(e,setup,"INSERT INTO bad VALUES(1,NULL,10),(2,NULL,20)");e.close_session(setup);
@@ -57,9 +57,9 @@ static void normal(const fs::path& path,json& proof){
  sql(e,a,"SET TRANSACTION PROTOCOL TREE");auto imported=e.import_data(a,{{"format","csv"},{"table","t"},{"content","id,parent,v\n6,1,60\n"}});need(!imported["ok"]&&imported["error"]["code"]=="TREE_UNSUPPORTED","CSV cannot bypass TREE guard");sql(e,a,"SET TRANSACTION PROTOCOL TREE");auto exported=e.export_data(a,{{"format","csv"},{"table","t"}});need(!exported["ok"]&&exported["error"]["code"]=="TREE_UNSUPPORTED","unrestricted export cannot bypass node access");
  open(e,a);sql(e,a,"TREE LOCK 2");value(e,a,2,22);sql(e,a,"COMMIT");for(auto& s:std::vector<std::string>{a,b,other})e.close_session(s);auto verify=e.open_session();sql(e,verify,"VERIFY");e.close_session(verify);
 }
-int main(int argc,char** argv){fs::path dir=argc>1?fs::u8path(argv[1]):fs::temp_directory_path()/fs::path("edudb-tree-"+std::to_string(GetCurrentProcessId()));std::string mode=argc>2?argv[2]:"normal";auto receipt=argc>3?fs::u8path(argv[3]):dir/"result.json";json proof={{"mode",mode},{"scope","isolated TREE static logical row topology; early release only unwritten nodes, written nodes held to END"}};try{
+int main(int argc,char** argv){fs::path dir=argc>1?fs::u8path(argv[1]):fs::temp_directory_path()/fs::path("edudb-tree-"+std::to_string(edudb_test::process_id()));std::string mode=argc>2?argv[2]:"normal";auto receipt=argc>3?fs::u8path(argv[3]):dir/"result.json";json proof={{"mode",mode},{"scope","isolated TREE static logical row topology; early release only unwritten nodes, written nodes held to END"}};try{
  fs::create_directories(dir);if(mode=="normal"){need(!fs::exists(dir/"core"),"fresh directory");normal(dir/"core",proof);lifecycle(dir,proof);{StorageOptions o;o.recovery_mode="ARIES_PAGE";Engine e((dir/"aries-reject").u8string(),8,32u*1024u*1024u,o);auto s=e.open_session();error(e,s,"BEGIN PROTOCOL TREE","ARIES_PROTOCOL");e.close_session(s);}}
- else if(mode=="hold-commit"||mode=="hold-loser"){Engine e((dir/"core").u8string(),8);auto s=e.open_session();open(e,s);sql(e,s,"TREE LOCK 1");sql(e,s,"UPDATE t SET v=77 WHERE id=1");if(mode=="hold-commit")sql(e,s,"COMMIT");proof["pid"]=GetCurrentProcessId();proof["status"]="READY_FOR_EXTERNAL_TERMINATE";proof["events"]=events;write(receipt,proof);for(unsigned i=0;i<120;++i)std::this_thread::sleep_for(std::chrono::seconds(1));throw std::runtime_error("external kill missing");}
+ else if(mode=="hold-commit"||mode=="hold-loser"){Engine e((dir/"core").u8string(),8);auto s=e.open_session();open(e,s);sql(e,s,"TREE LOCK 1");sql(e,s,"UPDATE t SET v=77 WHERE id=1");if(mode=="hold-commit")sql(e,s,"COMMIT");proof["pid"]=edudb_test::process_id();proof["status"]="READY_FOR_EXTERNAL_TERMINATE";proof["events"]=events;write(receipt,proof);for(unsigned i=0;i<120;++i)std::this_thread::sleep_for(std::chrono::seconds(1));throw std::runtime_error("external kill missing");}
  else if(mode=="recover-commit"||mode=="recover-loser"){Engine e((dir/"core").u8string(),8);proof["startup"]=e.diagnostics();auto s=e.open_session();open(e,s);sql(e,s,"TREE LOCK 1");value(e,s,1,mode=="recover-commit"?77:10);sql(e,s,"COMMIT");open(e,s);sql(e,s,"TREE LOCK 2");value(e,s,2,22);sql(e,s,"COMMIT");e.close_session(s);s=e.open_session();sql(e,s,"VERIFY");e.close_session(s);}else throw std::runtime_error("unknown mode");
  proof["status"]="PASS";proof["checks"]=checks;proof["events"]=events;write(receipt,proof);std::cout<<"TREE_TEST_PASS checks="<<checks<<"\n";return 0;
  }catch(const std::exception& ex){proof["status"]="FAIL";proof["error"]=ex.what();proof["checks"]=checks;proof["events"]=events;try{write(receipt,proof);}catch(...){}std::cerr<<ex.what()<<"\n";return 1;}}

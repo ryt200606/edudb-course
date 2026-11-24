@@ -28,6 +28,8 @@ json catalog_table_features(const json& metadata){
         // dependencies and policy determine discovery under the catalog lock.
         definition.erase("delta");result["materialized_view"]=std::move(definition);
     }
+    if(metadata.contains("integrity")&&!metadata.at("integrity").empty())result["integrity"]=metadata.at("integrity");
+    if(metadata.contains("statistics_definitions"))result["statistics_definitions"]=metadata["statistics_definitions"];
     if(metadata.contains("materialized_aux"))result["materialized_aux"]=metadata.at("materialized_aux");
     return result;
 }

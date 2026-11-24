@@ -180,13 +180,15 @@ int main(int argc,char** argv) {
     SetConsoleOutputCP(CP_UTF8);SetConsoleCP(CP_UTF8);
 #endif
     try {
-        std::string mode=argc>1?argv[1]:"help", data="data-v4", url="http://127.0.0.1:8765", file,format="csv",table,sql,source;bool header=true,data_given=false;
+        std::string mode=argc>1?argv[1]:"help", data="data-v41", url="http://127.0.0.1:8765", file,format="csv",table,sql,source;bool header=true,data_given=false;
         std::vector<std::string> archive_files;std::uint64_t target_lsn=0;bool target_given=false,replica_given=false,port_given=false;unsigned replica_port=0;std::string replication_token;
         StorageOptions storage_options;json media_request={{"action","status"}};
+        const bool handoff=mode=="handoff-offer"||mode=="handoff-surrender"||mode=="handoff-accept";
+        std::string handoff_key_file;
         if(mode=="help"||mode=="--help"||mode=="-h") {
-            std::cout<<"EduDB 4.0.0\nedudb serve --data DIR --web DIR --port 8765\nedudb shell --url http://127.0.0.1:8765\nedudb run --url http://127.0.0.1:8765 --file demo.sql [--timeout-ms 300000]\nedudb batch --url URL --file readonly-batch.sql [--timeout-ms 300000]\nedudb import --url URL --format csv --table TABLE --file input.csv [--header true]\nedudb import --url URL --format sql --file dump.sql\nedudb export --url URL --format csv --table TABLE --file new.csv\nedudb export --url URL --format sql --file new.sql\nedudb migrate-v2 --source CLOSED_V2_DIR --data NEW_V4_DIR\nedudb migrate-v3 --source CLOSED_V3_DIR --data NEW_V4_DIR\nedudb restore --source BACKUP_DIR --data NEW_DIR [--archive MANIFEST ...] [--target-lsn COMMIT_LSN]\nedudb serve --data RESTORED_DIR --replica-port 8876 --replication-token TOKEN\nedudb ship --source ARCHIVE_MANIFEST --port 8876 --replication-token TOKEN\nSQL recovery: BACKUP DATABASE AS 'label'; SET ARCHIVING ON; ARCHIVE WAL; SHOW RECOVERY; PROMOTE STANDBY;\nExport files are create-new; existing files are never overwritten.\n";return 0;
+            std::cout<<"EduDB 4.1.0\nedudb serve --data DIR --web DIR --port 8765 [--wal-group-size 1..16] [--wal-group-wait-us 0..10000]\nedudb shell --url http://127.0.0.1:8765\nedudb run --url http://127.0.0.1:8765 --file demo.sql [--timeout-ms 300000]\nedudb batch --url URL --file readonly-batch.sql [--timeout-ms 300000]\nedudb import --url URL --format csv --table TABLE --file input.csv [--header true]\nedudb import --url URL --format sql --file dump.sql\nedudb export --url URL --format csv --table TABLE --file new.csv\nedudb export --url URL --format sql --file new.sql\nedudb migrate-v2 --source CLOSED_V2_DIR --data NEW_V4_DIR\nedudb migrate-v3 --source CLOSED_V3_DIR --data NEW_V4_DIR\nedudb migrate-v4 --source CLOSED_4_0_DIR --data NEW_4_1_DIR\nedudb restore --source BACKUP_DIR --data NEW_DIR [--archive MANIFEST ...] [--target-lsn COMMIT_LSN]\nedudb serve --data RESTORED_DIR --replica-port 8876 --replication-token TOKEN\nedudb ship --source ARCHIVE_MANIFEST --port 8876 --replication-token TOKEN\nedudb handoff-offer --data CLOSED_STANDBY --key-file KEY\nedudb handoff-surrender --data CLOSED_PRIMARY --key-file KEY --source OFFER.json\nedudb handoff-accept --data CLOSED_STANDBY --key-file KEY --source TICKET.json\nSQL recovery: BACKUP DATABASE AS 'label'; SET ARCHIVING ON; ARCHIVE WAL; SHOW RECOVERY; PROMOTE STANDBY;\nExport files are create-new; existing files are never overwritten.\n";return 0;
         }
-        if(mode!="serve"&&mode!="shell"&&mode!="run"&&mode!="batch"&&mode!="import"&&mode!="export"&&mode!="migrate-v2"&&mode!="migrate-v3"&&mode!="media"&&mode!="restore"&&mode!="ship")throw DbError("ARGUMENT","Unknown mode: "+mode);
+        if(!handoff&&mode!="serve"&&mode!="shell"&&mode!="run"&&mode!="batch"&&mode!="import"&&mode!="export"&&mode!="migrate-v2"&&mode!="migrate-v3"&&mode!="migrate-v4"&&mode!="media"&&mode!="restore"&&mode!="ship")throw DbError("ARGUMENT","Unknown mode: "+mode);
         fs::path base=fs::absolute(fs::u8path(argv[0])).parent_path();
         std::string web=(fs::is_directory(base/"web")?base/"web":base.parent_path()/"web").u8string();int port=8765;std::size_t frames=128,limit=32u*1024u*1024u;std::uint64_t timeout_ms=300000;
         for(int i=2;i<argc;++i) {
@@ -197,8 +199,11 @@ int main(int argc,char** argv) {
             else if(a=="--target-lsn"){target_lsn=unsigned_argument(v,a,0,std::numeric_limits<std::uint64_t>::max());target_given=true;}
             else if(a=="--replica-port"){replica_port=static_cast<unsigned>(unsigned_argument(v,a,0,65535));replica_given=true;}
             else if(a=="--replication-token")replication_token=v;
+            else if(a=="--key-file"&&handoff)handoff_key_file=v;
             else if(a=="--file")file=v;else if(a=="--web")web=v;else if(a=="--frames")frames=static_cast<std::size_t>(unsigned_argument(v,a,2,65536));
             else if(a=="--private-limit")limit=static_cast<std::size_t>(unsigned_argument(v,a,1,1024u*1024u*1024u));
+            else if(a=="--wal-group-size")storage_options.wal_group_size=static_cast<unsigned>(unsigned_argument(v,a,1,16));
+            else if(a=="--wal-group-wait-us")storage_options.wal_group_wait_us=static_cast<unsigned>(unsigned_argument(v,a,0,10000));
             else if(a=="--data-layout")storage_options.data_layout=v;
             else if(a=="--recovery-mode")storage_options.recovery_mode=v;
             else if(a=="--aries-steal"||a=="--aries-force-at-commit"){
@@ -223,12 +228,29 @@ int main(int argc,char** argv) {
         if(mode!="media"&&(media_request.at("action")!="status"||media_request.contains("member")))throw DbError("ARGUMENT","--action/--member apply only to offline media maintenance");
         if(mode=="restore"){if(source.empty()||!data_given)throw DbError("ARGUMENT","restore requires --source BACKUP_DIR and --data NEW_DIR");std::cout<<recovery::restore_backup(source,archive_files,target_lsn,data).dump(2)<<"\n";return 0;}
         if(mode=="ship"){if(source.empty()||replication_token.empty()||!port_given)throw DbError("ARGUMENT","ship requires --source ARCHIVE_MANIFEST --port RECEIVER_PORT --replication-token TOKEN");std::cout<<recovery::ship_archive(source,static_cast<unsigned>(port),replication_token).dump(2)<<"\n";return 0;}
+        if(handoff){
+            if(!data_given||!fs::is_regular_file(fs::u8path(data)/"control.json")||handoff_key_file.empty()||
+               ((mode=="handoff-offer")!=source.empty()))
+                throw DbError("ARGUMENT","Handoff requires an existing closed database, private key file, and the appropriate source proof");
+            auto read_small=[](const std::string& path,std::size_t limit){
+                auto file=fs::u8path(path);
+                if(!fs::is_regular_file(file)||fs::file_size(file)>limit)throw DbError("HANDOFF_INPUT","Invalid handoff input size or type");
+                return read_transfer_file(path);
+            };
+            auto key=read_small(handoff_key_file,66);
+            while(!key.empty()&&(key.back()=='\n'||key.back()=='\r'))key.pop_back();
+            json proof=source.empty()?json():input::parse_json(read_small(source,8192));
+            Storage store(data);
+            auto response=mode=="handoff-offer"?store.handoff_offer(key):
+                mode=="handoff-surrender"?store.handoff_surrender(proof,key):store.handoff_accept(proof,key);
+            std::cout<<response.dump(2)<<"\n";return 0;
+        }
         if(mode=="media"){if(!data_given)throw DbError("ARGUMENT","media requires explicit --data CLOSED_DATABASE_DIR");std::cout<<Storage::media_maintenance(data,media_request).dump(2)<<"\n";return 0;}
         if(mode=="batch"){if(file.empty())throw DbError("ARGUMENT","batch requires --file");return shared_batch_mode(url,file,timeout_ms);}
         if(mode=="run"&&file.empty())throw DbError("ARGUMENT","run requires --file");
         if(mode=="shell"||mode=="run")return client_mode(url,file,timeout_ms);
         if(mode=="migrate-v2"){if(source.empty()||!data_given)throw DbError("ARGUMENT","migrate-v2 requires --source CLOSED_V2_DIR and explicit --data NEW_V4_DIR");const auto result=Storage::migrate_v2(source,data);std::cout<<result.dump(2)<<"\n";return result.value("status",std::string())=="PASS"?0:1;}
-        if(mode=="migrate-v3"){if(source.empty()||!data_given)throw DbError("ARGUMENT","migrate-v3 requires --source CLOSED_V3_DIR and explicit --data NEW_V4_DIR");const auto result=Storage::migrate_v3(source,data);std::cout<<result.dump(2)<<"\n";return result.value("status",std::string())=="PASS"?0:1;}
+        if(mode=="migrate-v3"||mode=="migrate-v4"){if(source.empty()||!data_given)throw DbError("ARGUMENT","Migration requires --source CLOSED_SOURCE_DIR and explicit --data NEW_DIR");const auto result=mode=="migrate-v3"?Storage::migrate_v3(source,data):Storage::migrate_v4(source,data);std::cout<<result.dump(2)<<"\n";return result.value("status",std::string())=="PASS"?0:1;}
         if(mode=="import"||mode=="export"){if(file.empty())throw DbError("ARGUMENT",mode+" requires --file");if(format!="csv"&&format!="sql")throw DbError("ARGUMENT","--format requires csv or sql");return transfer_mode(mode,url,file,format,table,sql,header,timeout_ms);}
         if(port<1||port>65535||frames<2)throw DbError("ARGUMENT","Invalid port or buffer frame count");
         if(!fs::is_regular_file(fs::u8path(web)/"index.html"))throw DbError("ARGUMENT","Web directory must contain index.html: "+web);
@@ -274,7 +296,7 @@ int main(int argc,char** argv) {
             };
         };
         server.set_error_handler([](const auto&,auto& res){if(res.get_header_value("Content-Type").find("application/json")!=std::string::npos)return;send(res,json{{"ok",false},{"error",{{"code",res.status==413?"REQUEST_TOO_LARGE":"HTTP_ERROR"},{"message","HTTP status "+std::to_string(res.status)}}}},res.status);});
-        server.Get("/api/v1/health",[&](const auto&,auto& res){send(res,json{{"ok",true},{"product","EduDB"},{"version","4.0.0"},{"instance_id",engine.instance_id()},{"input_limits",input::describe()}});});
+        server.Get("/api/v1/health",[&](const auto&,auto& res){send(res,json{{"ok",true},{"product","EduDB"},{"version","4.1.0"},{"instance_id",engine.instance_id()},{"input_limits",input::describe()}});});
         server.Post("/api/v1/sessions",protect([&](const auto&,auto& res){send(res,json{{"ok",true},{"session_id",engine.open_session()}});}));
         server.Post(R"(/api/v1/sessions/([^/]+)/sql)",protect([&](const auto& req,auto& res){
             auto body=request_json(req);if(!body.is_object()||!body.contains("sql")||!body["sql"].is_string())throw DbError("INVALID_REQUEST","Body must be an object with a string sql field");auto outcome=engine.execute(req.matches[1].str(),body["sql"].template get<std::string>());if(outcome.value("ok",false)&&outcome["plan"].is_object()&&outcome["plan"].value("node",std::string())=="PromoteStandby"&&receiver)receiver->stop();send(res,wire_result(std::move(outcome)));

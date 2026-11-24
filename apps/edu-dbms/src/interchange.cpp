@@ -85,6 +85,17 @@ static std::string options_clause(const json& options) {
     std::string out=" WITH (";bool first=true;
     for(auto it=options.begin();it!=options.end();++it){if(!first)out+=", ";first=false;out+=quote_identifier(it.key())+"="+sql_literal(it.value());}return out+")";
 }
+std::string dump_constraints(const std::string& name,const json& rules) {
+    std::string out;
+    for(const auto& rule:rules){
+        out+="ALTER TABLE "+quote_identifier(name)+" ADD CONSTRAINT "+quote_identifier(rule.at("name").get<std::string>());
+        if(rule.at("kind")=="check")out+=" CHECK ("+rule.at("sql").get<std::string>()+")";
+        else out+=" FOREIGN KEY ("+identifier_list(rule.at("columns"))+") REFERENCES "+quote_identifier(rule.at("parent").get<std::string>())+
+            " ("+identifier_list(rule.at("keys"))+") ON DELETE "+rule.at("on_delete").get<std::string>();
+        out+=";\n";
+    }
+    return out;
+}
 std::string dump_table(const std::string& name,const json& table) {
     if(table.contains("cluster"))throw DbError("EXPORT_DEPENDENCY","Use Engine SQL export to include cluster definitions and ordered attach operations");
     const auto& columns=table.at("columns");std::string out="CREATE TABLE "+quote_identifier(name)+" (";
@@ -122,7 +133,13 @@ std::string dump_table(const std::string& name,const json& table) {
         if(idx.contains("include")&&!idx["include"].empty())out+=" INCLUDE ("+identifier_list(idx["include"])+")";
         if(idx.contains("options"))out+=options_clause(idx["options"]);
         out+=";\n";
-    }return out;
+    }
+    if(table.contains("statistics_definitions")){
+        for(const auto& item:table.at("statistics_definitions").items())
+            out+="CREATE STATISTICS "+quote_identifier(item.key())+" (mcv) ON "+identifier_list(item.value())+" FROM "+quote_identifier(name)+";\n";
+    }
+    if(table.contains("integrity"))out+=dump_constraints(name,table.at("integrity"));
+    return out;
 }
 std::vector<std::string> split_sql_script(const std::string& content) {
     if(content.size()>64u*1024u*1024u)throw DbError("IMPORT_RESOURCE","SQL import exceeds 64 MiB");

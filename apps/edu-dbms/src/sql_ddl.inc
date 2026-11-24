@@ -3,10 +3,13 @@ json run(Session& s,Statement& st){
     auto result=blank_result();
     bool ddl=schema_statement(st)&&st.kind!="REFRESH_MATERIALIZED_VIEW";
     acquire(s,"catalog",ddl);
+    if(ddl&&!st.table.empty())integrity_protocol(s,st.table);
+
     if(st.kind=="CREATE_MATERIALIZED_VIEW"||st.kind=="REFRESH_MATERIALIZED_VIEW"||st.kind=="DROP_MATERIALIZED_VIEW"||st.kind=="SHOW_MATERIALIZED_VIEWS")return materialized_command(s,st);
     if(auto tree_result=run_tree(s,st))return *tree_result;
     materialized_schema_guard(s,st);
-    if(st.kind=="INSERT"||st.kind=="UPDATE"||st.kind=="DELETE"||st.kind=="TRUNCATE")materialized_write_guard(s,st.table);
+    json write_features=json::object();
+    if(st.kind=="INSERT"||st.kind=="UPDATE"||st.kind=="DELETE"||st.kind=="TRUNCATE")materialized_write_guard(s,st.table,&write_features);
     if(auto cluster_result=run_cluster(s,st))return *cluster_result;
     if(ddl&&!st.table.empty()&&exists(s,st.table))acquire(s,"table:"+st.table,true);
     if(st.kind=="VERIFY"){
@@ -16,6 +19,7 @@ json run(Session& s,Statement& st){
     }
     if(st.kind=="SELECT")return select(s,st);
     if(st.kind=="ANALYZE")return analyze(s,st);
+    if(st.kind=="CREATE_STATISTICS"||st.kind=="DROP_STATISTICS"||st.kind=="SHOW_STATISTICS")return statistics_command(s,st);
     if(st.kind=="SHOW_WAL_RECORDS"){
         const auto limit=st.limit==std::numeric_limits<std::size_t>::max()?4096:st.limit;
         result["diagnostic"]=storage.wal_records(limit);
@@ -33,6 +37,10 @@ json run(Session& s,Statement& st){
         result["diagnostic"]=std::move(view);result["plan"]={{"node",st.kind=="SHOW_WAL"?"WALStatus":"TransactionDiagnostics"}};return result;
     }
     if(st.kind=="TRUNCATE"){
+        auto graph=integrity_lock(s,st.table,"TRUNCATE",write_features);
+        for(const auto& link:graph.edges)if(link.parent==st.table&&link.child!=st.table)
+            fail("DEPENDENT_OBJECT","TRUNCATE is restricted by foreign key "+link.rule.at("name").get<std::string>()+"; use DELETE for row-level cascade");
+
         acquire(s,"table:"+st.table,true);auto metadata=table(s,st.table,false);
         auto affected=metadata.value("row_count",std::uint64_t(0));
         if(affected){metadata["rows"]=json::array();metadata["row_ids"]=json::array();storage.write_table(s.tx,st.table,metadata);}
@@ -49,6 +57,7 @@ json run(Session& s,Statement& st){
             result["columns"]={{{"name","name"},{"type","VARCHAR"}},{{"name","type"},{"type","VARCHAR"}},{{"name","not_null"},{"type","BOOLEAN"}},{{"name","primary"},{"type","BOOLEAN"}},{{"name","unique"},{"type","BOOLEAN"}},{{"name","default"},{"type","VARCHAR"}}};
             for(auto& c:t["columns"]){auto ty=c["type"].get<std::string>();if(ty=="VARCHAR"||ty=="BLOB")ty+="("+std::to_string(c["length"].get<std::uint64_t>())+")";result["rows"].push_back(json::array({c["name"],ty,c["not_null"],c["primary"],c["unique"],c["default"].is_null()?json(nullptr):json(c["default"].dump())}));}
             result["organization"]=t.value("organization",json{{"method","HEAP"}});
+            result["constraints"]=t.value("integrity",json::array());
             result["record_layout"]=t.at("record_layout");if(t.contains("cluster"))result["cluster"]=t["cluster"];
             if(materialized_metadata(t)){result["materialized_view"]=t.at("materialized_view");result["materialized_refresh_state"]=t.value("materialized_refresh_state",json::object());}
         }else{
@@ -63,17 +72,20 @@ json run(Session& s,Statement& st){
         if(!st.record_format.empty()){t["record_format"]=st.record_format;t["record_options"]=st.record_options;}
         if(!st.cluster_name.empty()){acquire_named_cluster(s,st.cluster_name,true);t["cluster"]={{"name",st.cluster_name},{"columns",st.cluster_columns}};}
         add_constraint_indexes(t,st.table);std::size_t uq=0;
-        for(auto& constraint:st.table_constraints){auto ns=constraint["columns"];auto kind=constraint["kind"].get<std::string>();std::set<std::string> seen;
+        for(auto& constraint:st.table_constraints){if(constraint.at("kind")!="primary"&&constraint.at("kind")!="unique")continue;auto ns=constraint["columns"];auto kind=constraint["kind"].get<std::string>();std::set<std::string> seen;
             if(kind=="primary")for(auto& x:t["indexes"])if(x.value("primary",false))fail("INVALID_SCHEMA","Only one PRIMARY KEY declaration is allowed");
             for(auto& n:ns){auto name=n.get<std::string>();if(!seen.insert(name).second)fail("DUPLICATE_COLUMN","Duplicate constraint column");auto c=column_id(t,name);if(kind=="primary")t["columns"][c]["not_null"]=true;}
             auto name=kind=="primary"?"__pk_"+st.table:"__uq_"+st.table+"_group"+std::to_string(++uq);
             t["indexes"].push_back({{"name",name},{"column",ns[0]},{"columns",ns},{"unique",true},{"primary",kind=="primary"}});
             if(ns.size()==1)t["columns"][column_id(t,ns[0].get<std::string>())][kind]=true;
         }
-        validate_table(t);storage.write_table(s.tx,st.table,t);return result;
+        validate_table(t);integrity_add(s,st.table,t,st.table_constraints);storage.write_table(s.tx,st.table,t);return result;
     }
     if(st.kind=="DROP_TABLE"){
-        if(!exists(s,st.table)){if(st.if_exists)return result;fail("TABLE_NOT_FOUND","Table not found: "+st.table);}storage.drop_table(s.tx,st.table);return result;
+        if(!exists(s,st.table)){if(st.if_exists)return result;fail("TABLE_NOT_FOUND","Table not found: "+st.table);}
+        for(const auto& fk:integrity_graph(storage.schema_features(s.tx)).edges)if(fk.parent==st.table&&fk.child!=st.table)
+            fail("DEPENDENT_OBJECT","Table is referenced by "+fk.child+"."+fk.rule.at("name").get<std::string>());
+        storage.drop_table(s.tx,st.table);return result;
     }
     if(st.kind=="CREATE_INDEX"){
         if(st.index.rfind("__",0)==0)fail("INVALID_IDENTIFIER","Names beginning __ are reserved");
@@ -85,6 +97,13 @@ json run(Session& s,Statement& st){
         std::string owner;if(!index_exists(s,st.index,&owner)){if(st.if_exists)return result;fail("INDEX_NOT_FOUND","Index not found: "+st.index);}
         if(st.index.rfind("__",0)==0)fail("CONSTRAINT_INDEX","Constraint indexes cannot be dropped directly");
         auto t=table(s,owner,false);auto& xs=t["indexes"];
+        integrity_protocol(s,owner);
+        for(const auto& fk:integrity_graph(storage.schema_features(s.tx)).edges)if(fk.parent==owner){
+            json copy=t;
+            auto& available=copy["indexes"];
+            available.erase(std::remove_if(available.begin(),available.end(),[&](const json& ix){return ix.at("name")==st.index;}),available.end());
+            if(integrity_index(copy,fk.rule.at("keys"),true).empty())fail("DEPENDENT_OBJECT","Referenced unique index supports "+fk.rule.at("name").get<std::string>());
+        }
         xs.erase(std::remove_if(xs.begin(),xs.end(),[&](const auto& x){return x["name"]==st.index;}),xs.end());storage.set_indexes(s.tx,owner,xs);return result;
     }
     if(st.kind=="REINDEX"){
@@ -98,33 +117,53 @@ json run(Session& s,Statement& st){
     }
     if(st.kind=="ALTER_TABLE"){
         auto t=table(s,st.table);
-        if(st.action=="RECORD_FORMAT"){
+        if(st.action=="ADD_CONSTRAINT"){
+            integrity_add(s,st.table,t,st.table_constraints);
+        }else if(st.action=="DROP_CONSTRAINT"){
+            auto rules=t.value("integrity",json::array());
+            auto it=std::find_if(rules.begin(),rules.end(),[&](const json& r){return r.at("name")==st.column;});
+            if(it==rules.end())fail("CONSTRAINT_NOT_FOUND","Unknown CHECK or foreign key: "+st.column);
+            rules.erase(it);if(rules.empty())t.erase("integrity");else t["integrity"]=rules;
+        }else if(st.action=="RECORD_FORMAT"){
             t["record_format"]=st.record_format;t["record_options"]=st.record_options;
             validate_table(t);storage.write_table(s.tx,st.table,t);result["plan"]={{"node","TransactionalRecordRewrite"},{"record_format",st.record_format},{"record_options",st.record_options}};return result;
         }else if(st.action=="ADD"){
             auto c=st.columns[0];for(auto& old:t["columns"])if(old["name"]==c["name"])fail("DUPLICATE_COLUMN","Column already exists");
             t["columns"].push_back(c);for(auto& r:t["rows"])r.push_back(c["default"]);
             if(c.value("primary",false)){for(auto& ix:t["indexes"])if(ix.value("primary",false))fail("INVALID_SCHEMA","PRIMARY KEY already exists");t["indexes"].push_back({{"name","__pk_"+st.table},{"column",c["name"]},{"unique",true},{"primary",true}});}else if(c.value("unique",false))t["indexes"].push_back({{"name","__uq_"+st.table+"_"+c["name"].get<std::string>()},{"column",c["name"]},{"unique",true}});
+            integrity_add(s,st.table,t,st.table_constraints);
         }else if(st.action=="DROP"){
             int c=column_id(t,st.column);if(t["columns"].size()==1)fail("INVALID_SCHEMA","Cannot drop final column");
             auto dependent=[&](const json& ns){return std::find(ns.begin(),ns.end(),json(st.column))!=ns.end();};
+            for(const auto& rule:t.value("integrity",json::array()))if(dependent(rule.at("columns")))fail("DEPENDENT_OBJECT","Column participates in constraint "+rule.at("name").get<std::string>());
+            for(const auto& fk:integrity_graph(storage.schema_features(s.tx)).edges)if(fk.parent==st.table&&dependent(fk.rule.at("keys")))fail("DEPENDENT_OBJECT","Column is referenced by foreign key "+fk.rule.at("name").get<std::string>());
             for(auto& x:t["indexes"])if(dependent(index_columns(x))||dependent(x.value("include",json::array())))fail("DEPENDENT_OBJECT","Column has an index/constraint dependency");
+            if(t.contains("statistics_definitions"))for(const auto& entry:t["statistics_definitions"].items())
+                if(dependent(entry.value()))fail("DEPENDENT_OBJECT","Drop statistics on this column before dropping the column");
             if(t.contains("cluster")&&dependent(t["cluster"]["columns"]))fail("DEPENDENT_OBJECT","Column is a clustering key; detach/recluster explicitly");
             if(t.contains("organization")&&dependent(t["organization"]["columns"]))fail("DEPENDENT_OBJECT","Column has a table organization dependency");
             t["columns"].erase(t["columns"].begin()+c);for(auto& r:t["rows"])r.erase(r.begin()+c);
         }else if(st.action=="RENAME_COLUMN"){
+            integrity_rename(s,st,t);
             int c=column_id(t,st.column);for(auto& old:t["columns"])if(old["name"]==st.newname)fail("DUPLICATE_COLUMN","Column already exists: "+st.newname);t["columns"][c]["name"]=st.newname;
             auto rename=[&](json& ns){for(auto& n:ns)if(n==st.column)n=st.newname;};
             for(auto& x:t["indexes"]){auto cols=index_columns(x);rename(cols);x["columns"]=cols;x["column"]=cols[0];if(x.contains("include"))rename(x["include"]);if(x["name"]=="__uq_"+st.table+"_"+st.column)x["name"]="__uq_"+st.table+"_"+st.newname;}
+            if(t.contains("statistics_definitions"))for(auto& cols:t["statistics_definitions"])rename(cols);
             if(t.contains("organization"))rename(t["organization"]["columns"]);
             if(t.contains("cluster"))rename(t["cluster"]["columns"]);
         }else{
             if(exists(s,st.newname))fail("TABLE_EXISTS","Table already exists: "+st.newname);
             if(st.newname.rfind("__",0)==0)fail("INVALID_IDENTIFIER","Names beginning __ are reserved");
+            integrity_rename(s,st,t);
             for(auto& x:t["indexes"]){auto n=x["name"].get<std::string>();if(n=="__pk_"+st.table)x["name"]="__pk_"+st.newname;else if(n.rfind("__uq_"+st.table+"_",0)==0)x["name"]="__uq_"+st.newname+"_"+n.substr(st.table.size()+6);}
             validate_table(t);storage.write_table(s.tx,st.newname,t);storage.drop_table(s.tx,st.table);return result;
         }
         validate_table(t);storage.write_table(s.tx,st.table,t);return result;
     }
-    auto mutated=mutate(s,st);if(mutated.value("affected_rows",std::uint64_t(0)))mutated["materialized_refreshes"]=materialized_maintain(s,{st.table});return mutated;
+    auto mutated=mutate(s,st,write_features);
+    if(mutated.value("affected_rows",std::uint64_t(0))){
+        auto changed=mutated.value("cascade_tables",std::vector<std::string>{});changed.push_back(st.table);
+        mutated["materialized_refreshes"]=materialized_maintain(s,changed);
+    }
+    return mutated;
 }

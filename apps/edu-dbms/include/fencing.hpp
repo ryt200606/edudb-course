@@ -33,6 +33,9 @@ public:
     // A crash after global force can reduce availability, never grant two owners.
     FencePermit promote(const std::string& new_instance,const std::string& source_timeline,
                         std::uint64_t replayed_lsn,unsigned wait_ms=5000);
+    json offer(const WriterIdentity& standby,std::uint64_t replayed,const std::string& key);
+    json surrender(const WriterIdentity& owner,std::uint64_t durable,const json& offer,const std::string& key);
+    FencePermit accept(const WriterIdentity& standby,std::uint64_t replayed,const json& ticket,const std::string& key,bool already_primary=false);
     json snapshot(unsigned wait_ms=5000)const;
     std::string directory()const;
 private:struct Impl;std::unique_ptr<Impl> impl_;

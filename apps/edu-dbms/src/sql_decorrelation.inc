@@ -54,10 +54,19 @@ std::vector<SqlDecorrelationPlan> decorrelation_plans(Session& session,const Sta
         plan.scan=choose_scan(plan.metadata,plan.source,plan.schema,0,locals,columns);plan.scan.spec.lazy_blobs=true;
         const auto inner_rows=plan.scan.estimated_rows;
         const double key_width=plan.inner_key->type=="VARCHAR"?32.0:16.0;
-        const bool estimated_spill=inner_rows*(key_width+128)>double(operator_memory_limit())/3;
+        // A top-level conjunct fixes this outer key to NULL. Ordinary SQL
+        // equality cannot match an inner row, so the lazy semi/anti operator
+        // never opens its inner input, even when the estimated outer count <1.
+        const bool only_null_keys=std::any_of(terms.begin(),terms.end(),[&](const E& term){
+            return term->kind==Expr::IsNull&&term->text=="IS NULL"&&
+                   term->args[0]->kind==Expr::Column&&term->args[0]->bound==plan.outer_slot;
+        });
+        const bool estimated_spill=!only_null_keys&&inner_rows*(key_width+128)>double(operator_memory_limit())/3;
         const double spill_cost=estimated_spill?(inner_rows*(key_width+16)*4+outer_rows*(key_width+16)*2)/8192:0;
-        const double apply_cost=outer_rows*plan.scan.cost,semi_cost=plan.scan.cost+inner_rows*0.03+outer_rows*0.02+spill_cost;
-        plan.explanation={{"operator",anti?"HashAntiJoin":"HashSemiJoin"},{"inner_table",plan.source.table},{"outer_slot",plan.outer_slot},{"inner_slot",plan.inner_key->bound},{"inner_access",plan.scan.description},{"outer_estimated_rows",outer_rows},{"inner_estimated_rows",inner_rows},{"apply_estimated_cost",apply_cost},{"decorrelated_estimated_cost",semi_cost},{"estimated_spill",estimated_spill},{"estimated_spill_cost",spill_cost},{"cost_assumption","Apply repeats estimated inner access; early matches or temporary partition reloads may change actual work"},{"profitable",semi_cost<apply_cost}};
+        const double apply_cost=outer_rows*plan.scan.cost;
+        const double inner_cost=only_null_keys?0:plan.scan.cost+inner_rows*0.03+spill_cost;
+        const double semi_cost=inner_cost+outer_rows*0.02;
+        plan.explanation={{"operator",anti?"HashAntiJoin":"HashSemiJoin"},{"inner_table",plan.source.table},{"outer_slot",plan.outer_slot},{"inner_slot",plan.inner_key->bound},{"inner_access",plan.scan.description},{"outer_estimated_rows",outer_rows},{"inner_estimated_rows",inner_rows},{"outer_key_proven_null",only_null_keys},{"apply_estimated_cost",apply_cost},{"decorrelated_estimated_cost",semi_cost},{"estimated_spill",estimated_spill},{"estimated_spill_cost",spill_cost},{"cost_assumption","Apply repeats estimated inner access; early matches or temporary partition reloads may change actual work"},{"profitable",semi_cost<apply_cost}};
         description["candidates"].push_back(plan.explanation);plans.push_back(std::move(plan));
     }
     if(plans.empty())return {};

@@ -1,10 +1,16 @@
 // Incremental DML; DDL may still rebuild table layout through write_table.
-json mutate(Session& session, Statement& statement) {
-    if(!try_record_locks(session,statement))acquire(session, "table:" + statement.table, true);
+json mutate(Session& session, Statement& statement,const json& write_features) {
+    auto graph=integrity_lock(session,statement.table,statement.kind,write_features);
+    const bool protected_table=graph.constrained.count(statement.table)!=0;
+    if(!protected_table&&!try_record_locks(session,statement))acquire(session, "table:" + statement.table, true);
     const auto metadata = table(session, statement.table, false);
     const auto columns = schema_for(metadata, statement.table);
     auto result = blank_result();
     std::size_t affected = 0;
+    auto rules=bind_integrity(session,statement.table,metadata);
+    std::vector<RemovedKey> removed;
+    const bool referenced=std::any_of(graph.edges.begin(),graph.edges.end(),[&](const ForeignEdge& edge){return edge.parent==statement.table;});
+
 
     if (statement.kind == "INSERT") {
         std::vector<int> targets;
@@ -40,6 +46,7 @@ json mutate(Session& session, Statement& statement) {
             storage.insert_row(session.tx, statement.table, row);
             ++affected;
         }
+        for(const auto& row:pending)integrity_check_row(session,rules,row);
         result["plan"] = {{"node", "IncrementalInsert"}, {"table", statement.table},
                            {"constraint_check", "persistent unique index probes"}};
     } else {
@@ -73,16 +80,27 @@ json mutate(Session& session, Statement& statement) {
         }
         // The cursor is destroyed and the qualifying RID set frozen before any
         // mutation. Updating the predicate/index key cannot revisit moved rows.
+        std::vector<json> changed_rows;
         for (const auto& row : matches_snapshot) {
-            if (statement.kind == "DELETE") storage.erase_row(session.tx, statement.table, row.id);
+            if (statement.kind == "DELETE") {
+                storage.erase_row(session.tx, statement.table, row.id);
+                if(referenced)removed.push_back({statement.table,row.values,nullptr});
+            }
             else {
                 json replacement = row.values;
                 for (const auto& setter : setters)
                     replacement[setter.first] = eval(setter.second, row.values);
-                storage.update_row(session.tx, statement.table, row.id,
-                                   validate_row(replacement, metadata["columns"]));
+                replacement=validate_row(replacement,metadata["columns"]);
+                storage.update_row(session.tx,statement.table,row.id,replacement);
+                if(referenced)removed.push_back({statement.table,row.values,replacement});
+                if(!rules.checks.empty()||!rules.outgoing.empty())changed_rows.push_back(std::move(replacement));
             }
             ++affected;
+        }
+        for(const auto& row:changed_rows)integrity_check_row(session,rules,row);
+        if(!removed.empty()){
+            auto cascaded=integrity_parent_changes(session,graph,removed);
+            if(!cascaded.empty())result["cascade_tables"]=cascaded;
         }
         result["plan"] = {{"node", statement.kind == "UPDATE" ? "IncrementalUpdate" : "IncrementalDelete"},
                            {"source", choice.description}, {"halloween_protection", "frozen qualifying RID set"},

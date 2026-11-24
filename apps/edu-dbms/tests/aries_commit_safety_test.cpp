@@ -1,10 +1,10 @@
+#include "test_platform.hpp"
 #include "aries_recovery.hpp"
 #include "edudb.hpp"
 #include "managed_block_device.hpp"
 #include <filesystem>
 #include <chrono>
 #include <iostream>
-#include <windows.h>
 using namespace edudb;namespace a=edudb::aries;namespace fs=std::filesystem;
 namespace {
 const std::string uuid="0123456789abcdef0123456789abcdef";
@@ -30,9 +30,9 @@ json unit(const fs::path& root){json checks=json::array();
 json actual_sql(const fs::path& root){json checks=json::array();for(const char* phase:{"aries_after_commit_force_once","aries_after_manager_commit_once"}){
  auto dir=root/phase;StorageOptions options;options.recovery_mode="ARIES_PAGE";
  {Engine db(dir.u8string(),2,32u*1024u*1024u,options);auto s=db.open_session();sql(db,s,"CREATE TABLE t(id INTEGER PRIMARY KEY,v VARCHAR(60))");sql(db,s,"INSERT INTO t VALUES(1,'原始行')");db.checkpoint();}
- check(_putenv_s("EDUDB_TEST_IO_FAULT",phase)==0,"set CRT fault env");json outcome,diagnostic;
- try{Engine db(dir.u8string(),2);check(_putenv_s("EDUDB_TEST_IO_FAULT","")==0,"clear CRT fault env");auto s=db.open_session();sql(db,s,"BEGIN");sql(db,s,"UPDATE t SET v='提交应保留' WHERE id=1");sql(db,s,"INSERT INTO t VALUES(2,'新提交行')");outcome=db.execute(s,"COMMIT");check(!outcome.value("ok",true)&&outcome["error"]["code"]=="IO_ERROR","commit returned success or wrong injected error: "+outcome.dump());diagnostic=db.diagnostics();check(diagnostic["storage"]["recovery_required"],"Storage/Manager combined diagnostics hid post-commit failure");auto other=db.open_session();auto denied=db.execute(other,"INSERT INTO t VALUES(3,'故障后拒写')");check(!denied.value("ok",true)&&denied["error"]["code"]=="RECOVERY_REQUIRED","new writer not fail-stopped: "+denied.dump());}
- catch(...){_putenv_s("EDUDB_TEST_IO_FAULT","");throw;}
+ check(edudb_test::set_env("EDUDB_TEST_IO_FAULT",phase)==0,"set CRT fault env");json outcome,diagnostic;
+ try{Engine db(dir.u8string(),2);check(edudb_test::set_env("EDUDB_TEST_IO_FAULT","")==0,"clear CRT fault env");auto s=db.open_session();sql(db,s,"BEGIN");sql(db,s,"UPDATE t SET v='提交应保留' WHERE id=1");sql(db,s,"INSERT INTO t VALUES(2,'新提交行')");outcome=db.execute(s,"COMMIT");check(!outcome.value("ok",true)&&outcome["error"]["code"]=="IO_ERROR","commit returned success or wrong injected error: "+outcome.dump());diagnostic=db.diagnostics();check(diagnostic["storage"]["recovery_required"],"Storage/Manager combined diagnostics hid post-commit failure");auto other=db.open_session();auto denied=db.execute(other,"INSERT INTO t VALUES(3,'故障后拒写')");check(!denied.value("ok",true)&&denied["error"]["code"]=="RECOVERY_REQUIRED","new writer not fail-stopped: "+denied.dump());}
+ catch(...){edudb_test::set_env("EDUDB_TEST_IO_FAULT","");throw;}
  json after;{Engine recovered(dir.u8string(),2);auto s=recovered.open_session();after=sql(recovered,s,"SELECT id,v FROM t ORDER BY id");check(after["rows"]==json::array({json::array({1,"提交应保留"}),json::array({2,"新提交行"})}),"real SQL restart discarded durable commit: "+after.dump());auto verified=sql(recovered,s,"VERIFY");check(verified["verification"]["ok"],"real SQL verify failed");check(recovered.diagnostics()["storage"]["clr_records"]==0,"durable SQL commit was later compensated");}
  {Engine recovered(dir.u8string(),2);auto s=recovered.open_session();check(sql(recovered,s,"SELECT id,v FROM t ORDER BY id")["rows"]==after["rows"],"SQL repeated restart changed result");}
  checks.push_back({{"case",phase},{"status","PASS"},{"commit_response",outcome},{"failure_diagnostics",diagnostic},{"recovered_rows",after["rows"]}});

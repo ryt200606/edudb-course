@@ -1,5 +1,6 @@
 // Public format 3 adapters. The caller holds strict catalog/table locks.
 void Storage::write_table(const std::shared_ptr<Transaction>& tx,const std::string& name,const json& table){impl_->require_writable();
+    if(!table.value("integrity",json::array()).empty()||!table.value("statistics_definitions",json::object()).empty())impl_->require_extended_catalog();
     if(!tx||!tx->state)throw DbError("NO_TRANSACTION","No transaction");std::lock_guard<std::recursive_mutex> guard(tx->state->mutex);auto& s=*impl_;s.require(tx);Impl::BackupWriteOperation operation(*impl_,tx);
     if(!table.contains("columns")||!table.contains("rows")||!table.at("rows").is_array())throw DbError("INVALID_TABLE","Table needs columns and rows");
     if(s.logical_mode){s.logical_pk(table);if(!table.at("rows").empty())throw DbError("LOGICAL_DDL_EMPTY","Logical-mode schema creation must precede separate DML transactions");s.logical_prepare_ddl(tx);}

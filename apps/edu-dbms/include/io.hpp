@@ -16,6 +16,18 @@ public:
 private:
     IoScope* previous_; std::string purpose_; std::array<IoCounter,4> counters_{}; json trace_=json::array(); std::uint64_t trace_total_=0;
 };
+// While the originating request is blocked in commit, the batch leader performs
+// its page I/O. Attribute that work to the originating request exactly once.
+class IoRequestBinding {
+public:
+    static IoScope* current() noexcept;
+    explicit IoRequestBinding(IoScope* target) noexcept;
+    ~IoRequestBinding() noexcept;
+    IoRequestBinding(const IoRequestBinding&)=delete;
+    IoRequestBinding& operator=(const IoRequestBinding&)=delete;
+private:
+    IoScope* previous_;
+};
 // Explicit owner affects instance totals only; request trace keeps real paths.
 // Thread-local nesting is implemented once in io.cpp, never inline dynamic TLS.
 class IoOwnerScope {

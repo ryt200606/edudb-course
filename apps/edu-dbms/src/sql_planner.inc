@@ -115,10 +115,24 @@ ScanChoice choose_scan(const json& table,const Source& source,const Schema& sche
     }
     selected.spec.condition=conjunction;
     bool have_statistics=table.contains("statistics")&&table["statistics"].is_object()&&!table["statistics"].value("stale",false)&&table["statistics"].contains("columns");
-    if(have_statistics){selected.estimated_rows=rows*estimate_truth(table,conjunction).t;candidates[0]["estimated_rows"]=selected.estimated_rows;}
+    std::set<std::string> used_statistics;
+    double output_rows=rows*estimate_truth(table,conjunction,&used_statistics).t;
+    for(const auto& ix:table["indexes"]){
+        if(!ix.value("unique",false))continue;
+        bool point=true;
+        for(const auto& col:index_columns(ix)){
+            auto range=ranges.find(column_id(table,col));
+            if(range==ranges.end()||!range->second.equal()||range->second.lo.is_null()){point=false;break;}
+        }
+        if(point)output_rows=std::min(1.0,output_rows);
+    }
+    double selected_entries=rows;
+    selected.estimated_rows=output_rows;
+    candidates[0]["estimated_rows"]=output_rows;
+    candidates[0]["estimated_access_entries"]=rows;
 
-    for(auto& r:ranges)if(r.second.bad){selected.empty=true;selected.estimated_rows=0;selected.cost=0;selected.description={{"table",source.table},{"alias",source.alias},{"scan","EmptyScan"},{"index",nullptr},{"estimated_rows",0},{"estimated_cost",0},{"candidates",candidates},{"selection","contradictory typed bounds"}};return selected;}
-    if(source.force_scan){selected.description={{"table",source.table},{"alias",source.alias},{"scan","SeqScan"},{"index",nullptr},{"estimated_rows",rows},{"estimated_cost",selected.cost},{"candidates",candidates},{"selection","explicit USE SCAN"}};return selected;}
+    for(auto& r:ranges)if(r.second.bad){selected.empty=true;selected.estimated_rows=0;selected.cost=0;selected.description={{"table",source.table},{"alias",source.alias},{"scan","EmptyScan"},{"index",nullptr},{"estimated_rows",0},{"estimated_access_entries",0},{"joint_statistics_used",used_statistics},{"estimated_cost",0},{"candidates",candidates},{"selection","contradictory typed bounds"}};return selected;}
+    if(source.force_scan){selected.description={{"table",source.table},{"alias",source.alias},{"scan","SeqScan"},{"index",nullptr},{"estimated_rows",output_rows},{"estimated_access_entries",rows},{"joint_statistics_used",used_statistics},{"estimated_cost",selected.cost},{"candidates",candidates},{"selection","explicit USE SCAN"}};return selected;}
     bool hint_exists=source.index_hint.empty();for(auto& ix:table["indexes"])if(ix["name"]==source.index_hint)hint_exists=true;if(!hint_exists)fail("INDEX_NOT_FOUND","Hint index not found on table: "+source.index_hint);
     bool best_unique=false;std::string selected_scan="SeqScan";std::vector<std::string> independent;
     std::map<int,std::vector<std::string>> bitmap_columns;
@@ -134,8 +148,8 @@ ScanChoice choose_scan(const json& table,const Source& source,const Schema& sche
         double cost=(hash?0.5:std::max(1.0,height)*0.35)+estimate*0.03+(cover?0:std::min(pages,estimate)*0.5);
         std::string scan=method=="BPLUS"?"IndexScan":method=="BTREE"?"BTreeScan":method=="HASH_STATIC"?"StaticHashLookup":method=="HASH_EXTENDIBLE"?"ExtendibleHashLookup":method=="HASH_LINEAR"?"LinearHashLookup":method=="BITMAP"?"BitmapScan":method=="ORDERED_DENSE"?"DenseIndexScan":"SparseIndexScan";
         if(cover)scan="IndexOnlyScan";
-        json d={{"scan",scan},{"index",name},{"method",method},{"columns",cols},{"lower_key",lo.empty()?json(nullptr):lo},{"upper_key",hi.empty()?json(nullptr):hi},{"lower_inclusive",li},{"upper_inclusive",ui},{"estimated_rows",estimate},{"estimated_cost",cost},{"unique_equality",uniq},{"covering",cover},{"reason","typed key-prefix bounds; normalized page/tuple heuristic"}};candidates.push_back(d);independent.push_back(name);
-        if((!source.index_hint.empty()&&name==source.index_hint)||(source.index_hint.empty()&&cost<selected.cost)){selected.spec.index=name;selected.spec.mode="INDEX";selected.spec.lower_key=lo.empty()?json(nullptr):lo;selected.spec.upper_key=hi.empty()?json(nullptr):hi;selected.spec.lower_inclusive=li;selected.spec.upper_inclusive=ui;selected.spec.lower.reset();selected.spec.upper.reset();if(lo.size()==1&&lo[0].is_number_integer())selected.spec.lower=lo[0].get<std::int64_t>();if(hi.size()==1&&hi[0].is_number_integer())selected.spec.upper=hi[0].get<std::int64_t>();selected.estimated_rows=have_statistics?std::min(estimate,rows*estimate_truth(table,conjunction).t):estimate;selected.cost=cost;best_unique=uniq;selected_scan=scan;}
+        json d={{"scan",scan},{"index",name},{"method",method},{"columns",cols},{"lower_key",lo.empty()?json(nullptr):lo},{"upper_key",hi.empty()?json(nullptr):hi},{"lower_inclusive",li},{"upper_inclusive",ui},{"estimated_rows",output_rows},{"estimated_access_entries",estimate},{"estimated_cost",cost},{"unique_equality",uniq},{"covering",cover},{"reason","typed key-prefix bounds; normalized page/tuple heuristic"}};candidates.push_back(d);independent.push_back(name);
+        if((!source.index_hint.empty()&&name==source.index_hint)||(source.index_hint.empty()&&cost<selected.cost)){selected.spec.index=name;selected.spec.mode="INDEX";selected.spec.lower_key=lo.empty()?json(nullptr):lo;selected.spec.upper_key=hi.empty()?json(nullptr):hi;selected.spec.lower_inclusive=li;selected.spec.upper_inclusive=ui;selected.spec.lower.reset();selected.spec.upper.reset();if(lo.size()==1&&lo[0].is_number_integer())selected.spec.lower=lo[0].get<std::int64_t>();if(hi.size()==1&&hi[0].is_number_integer())selected.spec.upper=hi[0].get<std::int64_t>();selected_entries=estimate;selected.cost=cost;best_unique=uniq;selected_scan=scan;}
     }
     if(!source.index_hint.empty()&&selected.spec.index!=source.index_hint)fail("INDEX_NOT_APPLICABLE","Hint requires a supported leading-key condition: "+source.index_hint);
     // A boolean bitmap plan is legal only when every local predicate is
@@ -145,17 +159,47 @@ ScanChoice choose_scan(const json& table,const Source& source,const Schema& sche
     bool complete=!predicates.empty();for(auto& e:predicates){std::set<int> refs;references(e,refs);bool local=!refs.empty();for(int r:refs)local=local&&r>=offset&&r<offset+width;if(local&&access_predicate(e,offset,width).is_null())complete=false;}
     if(!best_unique&&source.index_hint.empty()&&complete&&bitmap_covered(conjunction)){
         std::sort(bitmap_indexes.begin(),bitmap_indexes.end());bitmap_indexes.erase(std::unique(bitmap_indexes.begin(),bitmap_indexes.end()),bitmap_indexes.end());
-        double bitmap_rows=have_statistics?rows*estimate_truth(table,conjunction).t:std::min(selected.estimated_rows,rows*0.1);double bitmap_cost=std::max(1.0,rows/64.0*0.01)+std::min(pages,bitmap_rows)*0.5;
-        if(bitmap_cost<selected.cost){selected.spec.mode="BITMAP";selected.spec.index=bitmap_indexes[0];selected.spec.indexes=bitmap_indexes;selected.spec.lower_key=nullptr;selected.spec.upper_key=nullptr;selected.spec.lower.reset();selected.spec.upper.reset();selected_scan="BitmapBooleanScan";selected.estimated_rows=std::min(selected.estimated_rows,rows*0.1);selected.cost=std::max(1.0,rows/64.0*0.01)+std::min(pages,selected.estimated_rows)*0.5;candidates.push_back({{"scan",selected_scan},{"indexes",bitmap_indexes},{"estimated_rows",selected.estimated_rows},{"estimated_cost",selected.cost},{"reason","all typed boolean leaves have persistent bitmap indexes; SQL 3VL retained"}});}
+        double bitmap_rows=output_rows;double bitmap_cost=std::max(1.0,rows/64.0*0.01)+std::min(pages,bitmap_rows)*0.5;
+        candidates.push_back({{"scan","BitmapBooleanScan"},{"indexes",bitmap_indexes},{"estimated_rows",output_rows},
+            {"estimated_access_entries",bitmap_rows},{"estimated_bitmap_words",std::ceil(rows/64)*bitmap_indexes.size()},
+            {"estimated_cost",bitmap_cost},{"reason","word-level predicate combination, then matching row locators"}});
+        if(bitmap_cost<selected.cost){
+            selected.spec.mode="BITMAP";selected.spec.index=bitmap_indexes[0];selected.spec.indexes=bitmap_indexes;
+            selected.spec.lower_key=nullptr;selected.spec.upper_key=nullptr;selected.spec.lower.reset();selected.spec.upper.reset();
+            selected_scan="BitmapBooleanScan";selected_entries=bitmap_rows;selected.cost=bitmap_cost;
+        }
     }else if(!best_unique&&source.index_hint.empty()&&independent.size()>1){
         // Intersect independently indexed conjunctions. The adapter obtains a
         // safe candidate superset per index, then SQL evaluates the residual.
         std::set<int> distinct_keys;std::vector<std::string> separate;
         for(auto& name:independent)for(auto& ix:table["indexes"])if(ix["name"]==name){int c=column_id(table,index_columns(ix)[0].get<std::string>());if(distinct_keys.insert(c).second)separate.push_back(name);}
-        if(separate.size()>1){double estimate=rows,access_cost=0;for(auto& name:separate)for(auto& c:candidates)if(c.value("index",json())==name){auto e=c.value("estimated_rows",rows);estimate*=rows?std::min(1.0,e/rows):0;access_cost+=0.35+e*0.03;break;}double cost=access_cost+std::min(pages,estimate)*0.5;candidates.push_back({{"scan","IndexIntersect"},{"indexes",separate},{"estimated_rows",estimate},{"estimated_cost",cost},{"reason","distinct indexed AND columns; independent-selectivity teaching estimate"}});if(cost<selected.cost){selected.spec.mode="INTERSECT";selected.spec.indexes=separate;selected_scan="IndexIntersect";selected.spec.lower_key=nullptr;selected.spec.upper_key=nullptr;selected.spec.lower.reset();selected.spec.upper.reset();selected.estimated_rows=estimate;selected.cost=cost;}}
+        if(separate.size()>1){
+            json covered_bounds=nullptr;
+            for(const auto& predicate:predicates){
+                auto leaf=access_predicate(predicate,offset,width);
+                if(!leaf.contains("column")||!distinct_keys.count(leaf.at("column").get<int>()))continue;
+                covered_bounds=covered_bounds.is_null()?leaf:json{{"op","AND"},{"args",{covered_bounds,leaf}}};
+            }
+            double entries=0,access_cost=0;
+            for(const auto& name:separate)for(const auto& candidate:candidates){
+                if(candidate.value("index",json())!=name)continue;
+                double visited=candidate.at("estimated_access_entries");
+                entries+=visited;access_cost+=0.35+visited*0.03;break;
+            }
+            const double intersect_rows=rows*estimate_truth(table,covered_bounds).t;
+            const double cost=access_cost+std::min(pages,intersect_rows)*0.5;
+            candidates.push_back({{"scan","IndexIntersect"},{"indexes",separate},{"estimated_rows",output_rows},
+                {"estimated_access_entries",entries},{"estimated_candidate_rows",intersect_rows},{"estimated_cost",cost},
+                {"reason","sum index entries read; estimate common row locators using eligible column statistics"}});
+            if(cost<selected.cost){
+                selected.spec.mode="INTERSECT";selected.spec.index.clear();selected.spec.indexes=separate;selected_scan="IndexIntersect";
+                selected.spec.lower_key=nullptr;selected.spec.upper_key=nullptr;selected.spec.lower.reset();selected.spec.upper.reset();
+                selected_entries=entries;selected.cost=cost;
+            }
+        }
 
     }
-    selected.description={{"table",source.table},{"alias",source.alias},{"scan",selected_scan},{"index",selected.spec.index.empty()?json(nullptr):json(selected.spec.index)},{"indexes",selected.spec.indexes},{"lower",selected.spec.lower?json(*selected.spec.lower):json(nullptr)},{"upper",selected.spec.upper?json(*selected.spec.upper):json(nullptr)},{"lower_key",selected.spec.lower_key},{"upper_key",selected.spec.upper_key},{"lower_inclusive",selected.spec.lower_inclusive},{"upper_inclusive",selected.spec.upper_inclusive},{"estimated_rows",selected.estimated_rows},{"estimated_cost",selected.cost},{"candidates",candidates},{"selection",!source.index_hint.empty()?"explicit USE INDEX":best_unique?"unique equality preferred":"lowest estimated cost; bitmap/intersection for eligible boolean predicates"}};
+    selected.description={{"table",source.table},{"alias",source.alias},{"scan",selected_scan},{"index",selected.spec.index.empty()?json(nullptr):json(selected.spec.index)},{"indexes",selected.spec.indexes},{"lower",selected.spec.lower?json(*selected.spec.lower):json(nullptr)},{"upper",selected.spec.upper?json(*selected.spec.upper):json(nullptr)},{"lower_key",selected.spec.lower_key},{"upper_key",selected.spec.upper_key},{"lower_inclusive",selected.spec.lower_inclusive},{"upper_inclusive",selected.spec.upper_inclusive},{"estimated_rows",selected.estimated_rows},{"estimated_access_entries",selected_entries},{"joint_statistics_used",used_statistics},{"estimated_cost",selected.cost},{"candidates",candidates},{"selection",!source.index_hint.empty()?"explicit USE INDEX":best_unique?"unique equality preferred":"lowest estimated cost; bitmap/intersection for eligible boolean predicates"}};
     return selected;
 }
 

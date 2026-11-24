@@ -80,6 +80,20 @@ function renderRows(j,s){
   for(const col of j.columns){const th=document.createElement('th');th.textContent=typeof col==='string'?col:col.name;tr.append(th);}head.append(tr);table.append(head);
   const tbody=document.createElement('tbody');
   for(const row of (j.rows||[]).slice(start,end)){const line=document.createElement('tr');for(const v of row){const td=document.createElement('td');td.textContent=v===null?'NULL':typeof v==='object'?JSON.stringify(v):String(v);if(v===null)td.className='null';line.append(td);}tbody.append(line);}table.append(tbody);wrap.append(table);
+  if(j.constraints?.length){
+    const section=document.createElement('section'),heading=document.createElement('h3'),list=document.createElement('dl');
+    section.className='table-constraints';section.setAttribute('aria-label','数据完整性约束');
+    heading.textContent='数据完整性约束';
+    const identifier=value=>'"'+String(value).replace(/"/g,'""')+'"';
+    for(const rule of j.constraints){
+      const name=document.createElement('dt'),definition=document.createElement('dd'),sql=document.createElement('code');
+      name.textContent=rule.name;
+      sql.textContent=rule.kind==='check'?`CHECK (${rule.sql})`:
+        `FOREIGN KEY (${rule.columns.map(identifier).join(', ')}) REFERENCES ${identifier(rule.parent)} (${rule.keys.map(identifier).join(', ')}) ON DELETE ${rule.on_delete}`;
+      definition.append(sql);list.append(name,definition);
+    }
+    section.append(heading,list);wrap.append(section);
+  }
   if(total>pageSize){
     const prev=document.createElement('button'),next=document.createElement('button'),label=document.createElement('span');prev.textContent='上一页';prev.id='result-prev';prev.disabled=s.page===0;next.textContent='下一页';next.id='result-next';next.disabled=s.page===last;
     label.textContent=`第 ${s.page+1} / ${last+1} 页 · 每页 ${pageSize} 行（仅显示分页）`;

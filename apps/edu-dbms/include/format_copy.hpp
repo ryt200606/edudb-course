@@ -35,7 +35,7 @@ public:
 class LegacySnapshot {
     struct Impl;std::unique_ptr<Impl> impl_;
 public:
-    LegacySnapshot(const fs::path& source,const fs::path& temporary_parent=fs::temp_directory_path(),Limits limits={},const Destination* destination=nullptr);
+    LegacySnapshot(const fs::path& source,const fs::path& temporary_parent=fs::temp_directory_path(),Limits limits={},const Destination* destination=nullptr,int expected_control=3);
     ~LegacySnapshot();
     const fs::path& source() const;const fs::path& path() const;
     const json& control() const;const json& source_files() const;

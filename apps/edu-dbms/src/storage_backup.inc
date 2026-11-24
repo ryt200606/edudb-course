@@ -105,17 +105,24 @@ json backup_replay(const std::string& manifest,int timeout_ms,bool validate_only
         result["io"]=scope.snapshot();return result;
     }catch(...){if(attempted)failed=true;throw;}
 }
-json backup_promote(int timeout_ms){
-    backup_ensure_redo();IoOwnerScope owner(directory);IoScope scope("same-machine fenced standby promotion");BackupMaintenance barrier(*this,timeout_ms);
+json backup_promote(int timeout_ms,const json* ticket=nullptr,const std::string& key={}){
+    backup_ensure_redo();IoOwnerScope owner(directory);IoScope scope("fenced standby promotion");BackupMaintenance barrier(*this,timeout_ms);
+    if(ticket&&backup_current_role()=="PRIMARY"){
+        auto previous=backup_writer_identity();
+        auto permit=backup_fence->accept(previous,durable_lsn.load(),*ticket,key,true);
+        return {{"role","PRIMARY"},{"writable",true},{"timeline",previous.timeline},{"fence_epoch",previous.epoch},{"idempotent",true}};
+    }
     const auto role=backup_current_role();if(role!="STANDBY"&&role!="RESTORED_READ_ONLY")throw DbError("PROMOTION_ROLE","Only a separate read-only recovered/standby instance can be promoted");
-    auto previous=backup_writer_identity();auto permit=backup_fence->promote(previous.instance_id,previous.timeline,durable_lsn.load());
+    auto previous=backup_writer_identity();
+    auto permit=ticket?backup_fence->accept(previous,durable_lsn.load(),*ticket,key):
+        backup_fence->promote(previous.instance_id,previous.timeline,durable_lsn.load());
     bool claimed=true;try{
         if(backup_phase_hook)backup_phase_hook("promotion_after_fence_force");std::lock_guard<std::mutex> wal_lock(wal_mutex);buffer->flush_all();data->sync();
         auto gen=generation+1;if(!gen)throw DbError("DATABASE_TOO_LARGE","WAL generation exhausted");while(fs::exists(wal_path(gen))){if(++gen==0)throw DbError("DATABASE_TOO_LARGE","WAL generation exhausted");}
         auto next=std::make_unique<NativeFile>(wal_path(gen),true,true);auto header=wal_header(gen,durable_lsn);next->write(0,header.data(),header.size());next->sync();sync_directory(directory);
         const auto& state=permit.state();{std::lock_guard<std::mutex> guard(backup_mutex);backup_role="PRIMARY";backup_timeline=state.at("timeline");backup_epoch=state.at("epoch");backup_archive_enabled=false;backup_metadata["timeline_parent"]=previous.timeline;backup_metadata["timeline_fork_lsn"]=durable_lsn.load();backup_error.clear();}
         atomic_manifest(directory,control(gen,durable_lsn));if(backup_phase_hook)backup_phase_hook("promotion_after_local_control");wal=std::move(next);generation=gen;checkpoint_lsn=durable_lsn;setup_buffer();backup_fenced=false;
-        auto result=backup_identity();result["writable"]=true;result["owner_confirmation"]="current promotion holds the durable ownership permit";result["scope"]="same-machine shared epoch/owner lease; asynchronous fork may omit unreceived primary commits";result["io"]=scope.snapshot();return result;
+        auto result=backup_identity();result["writable"]=true;result["owner_confirmation"]="current promotion holds the durable ownership permit";result["scope"]=ticket?"signed cross-domain handoff at the surrendered durable LSN":"same-machine shared epoch/owner lease; asynchronous fork may omit unreceived primary commits";result["io"]=scope.snapshot();return result;
     }catch(...){if(claimed)failed=true;throw;}
 }
 json backup_identity(){
@@ -137,5 +144,18 @@ json Storage::set_archiving(bool enabled,int timeout_ms){return impl_->backup_se
 json Storage::become_standby(int timeout_ms){return impl_->backup_become_standby(timeout_ms);}
 json Storage::replay_archive(const std::string& manifest,int timeout_ms,bool validate_only){return impl_->backup_replay(manifest,timeout_ms,validate_only);}
 json Storage::promote(int timeout_ms){return impl_->backup_promote(timeout_ms);}
+json Storage::handoff_offer(const std::string& key){
+    impl_->backup_ensure_redo();Impl::BackupMaintenance barrier(*impl_,5000);
+    if(impl_->backup_current_role()!="STANDBY"&&impl_->backup_current_role()!="RESTORED_READ_ONLY")
+        throw DbError("HANDOFF_ROLE","Only a separate read-only standby may issue an offer");
+    return impl_->backup_fence->offer(impl_->backup_writer_identity(),impl_->durable_lsn.load(),key);
+}
+json Storage::handoff_surrender(const json& offer,const std::string& key){
+    impl_->backup_ensure_redo();Impl::BackupMaintenance barrier(*impl_,5000);
+    if(impl_->backup_current_role()!="PRIMARY")throw DbError("HANDOFF_ROLE","Only the source primary may release ownership");
+    auto ticket=impl_->backup_fence->surrender(impl_->backup_writer_identity(),impl_->durable_lsn.load(),offer,key);
+    impl_->backup_fenced=true;return ticket;
+}
+json Storage::handoff_accept(const json& ticket,const std::string& key){return impl_->backup_promote(5000,&ticket,key);}
 json Storage::recovery_identity(){return impl_->backup_identity();}
 #endif

@@ -16,6 +16,7 @@ CsvRows parse_csv(const std::string& content);
 std::string encode_csv(const json& columns, const json& rows, bool header = true);
 std::string quote_identifier(const std::string& name);
 std::string sql_literal(const json& value);
+std::string dump_constraints(const std::string& name,const json& rules);
 std::string dump_table(const std::string& name, const json& table);
 // The SQL script has the same 64 MiB input bound and at most 100K statements.
 std::vector<std::string> split_sql_script(const std::string& content);

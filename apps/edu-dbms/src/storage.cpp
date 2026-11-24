@@ -252,11 +252,19 @@ std::optional<RowId> heap_append(Page& p,const std::string& bytes){auto count=ge
 }
 class FunctionCursor final:public RowCursor {std::function<bool(StoredRow&)> callback_;public:explicit FunctionCursor(std::function<bool(StoredRow&)> f):callback_(std::move(f)){}bool next(StoredRow& row)override{return callback_(row);}};
 }
+namespace {
+bool supported_catalog_reader(const json& c){
+    const auto minimum=c.value("minimum_reader_format",0);
+    const auto revision=c.value("sql_catalog_revision",0);
+    return (minimum==4 && revision==0)||(minimum==5 && revision==1);
+}
+}
 struct Storage::Impl {
     // Declared first, destroyed last: recovery-copy cleanup must follow closure
     // of buffer, ARIES authority, WAL/data and process-lock handles.
     std::unique_ptr<format_copy::LegacySnapshot> legacy_snapshot;
     bool legacy_read_only=false;
+    unsigned minimum_reader=5;
     std::unique_ptr<buffer::BufferPool> buffer;
     std::unique_ptr<aries::Manager> aries_manager;
     bool aries_mode=false,logical_mode=false;
@@ -275,13 +283,29 @@ struct Storage::Impl {
     std::uint64_t stale_query_files_removed=0,unrecognized_query_files_retained=0;
     #include "storage_protocol_fields.inc"
     #include "storage_backup_fields.inc"
+    struct GroupWriter {
+        std::shared_ptr<Transaction> tx;
+        IoScope* request;
+        std::exception_ptr error;
+        bool done=false;
+    };
+    unsigned group_size=1,group_wait_us=500;
+    std::mutex group_mutex;
+    std::condition_variable group_changed;
+    std::deque<GroupWriter*> group_queue;
+    bool group_running=false;
+    std::uint64_t group_syncs=0,group_transactions=0,group_peak=0; // WAL mutex
     Impl(const std::string& dir,std::size_t count,std::size_t limit,const StorageOptions& options):directory(media_detail::absolute_path(fs::u8path(dir))),frame_limit(count),private_limit(limit){
+        group_size=options.wal_group_size;group_wait_us=options.wal_group_wait_us;
+        if(!group_size||group_size>16||group_wait_us>10000)
+            throw DbError("INVALID_CONFIG","WAL group size must be 1..16 and wait 0..10000us");
         if(count<2||limit<PAGE_SIZE)throw DbError("INVALID_CONFIG","At least two frames and one private page required");
         fs::create_directories(directory);bool exists=fs::exists(directory/"control.json");
         if(exists){auto probe=read_manifest(directory/"control.json");auto version=probe.value("version",0);if(version!=3&&version!=4)throw DbError("INCOMPATIBLE_FORMAT","EduDB requires control4/page3; legacy control3 is read-only");if(version==3){legacy_snapshot=std::make_unique<format_copy::LegacySnapshot>(directory);legacy_snapshot->promote_owned_copy();directory=legacy_snapshot->path();legacy_read_only=true;}}
         process_lock=std::make_unique<NativeFile>(directory/"database.lock",true,false,true);io_reset(directory);IoOwnerScope constructor_io_owner(directory);
         if(!exists&&fs::exists(directory/"data.pages")&&fs::file_size(directory/"data.pages"))throw DbError("CORRUPT_CONTROL","Data exists without manifest; refusing overwrite");
         auto c=exists?read_manifest(directory/"control.json"):json::object();
+        if(exists)minimum_reader=c.value("minimum_reader_format",0u);
         const auto persistent_mode=exists?c.value("recovery_mode",std::string("REDO_PRIVATE")):(options.recovery_mode.empty()?std::string("REDO_PRIVATE"):options.recovery_mode);
         if(persistent_mode!="REDO_PRIVATE"&&persistent_mode!="ARIES_PAGE"&&persistent_mode!="ARIES_LOGICAL")throw DbError("RECOVERY_MODE","Recovery mode must be REDO_PRIVATE, ARIES_PAGE or ARIES_LOGICAL");
         if(exists&&!options.recovery_mode.empty()&&options.recovery_mode!=persistent_mode)throw DbError("RECOVERY_MODE","Changing recovery mode requires export/import into a new data directory");
@@ -293,7 +317,7 @@ struct Storage::Impl {
         if(!aries_mode&&(options.aries_steal.has_value()||options.aries_force_at_commit.has_value()))throw DbError("RECOVERY_MODE","ARIES policies require ARIES_PAGE or ARIES_LOGICAL mode");
         if(exists&&((options.aries_steal&&*options.aries_steal!=aries_options.steal)||(options.aries_force_at_commit&&*options.aries_force_at_commit!=aries_options.force_at_commit)))throw DbError("RECOVERY_MODE","Changing persisted ARIES policies requires export/import");
         if((fs::exists(directory/"backup-incomplete.json")&&!fs::exists(directory/"backup-complete.json"))||(fs::exists(directory/"restore-incomplete.json")&&!fs::exists(directory/"restore-complete.json")))throw DbError("RECOVERY_INCOMPLETE","Backup/restore publication did not complete");
-        if(exists&&(c.value("version",0)!=4||c.value("page_format",0)!=3||c.value("minimum_reader_format",0)!=4))throw DbError("INCOMPATIBLE_FORMAT","EduDB requires control4/page3 and minimum_reader_format4; use offline migration into a new directory");
+        if(exists&&(c.value("version",0)!=4||c.value("page_format",0)!=3||!supported_catalog_reader(c)))throw DbError("INCOMPATIBLE_FORMAT","Unsupported control4/page3 SQL catalog revision or minimum reader");
         if(exists&&(c.value("format",std::string())!="EduDB"||c.value("page_size",0)!=PAGE_SIZE))throw DbError("INCOMPATIBLE_FORMAT","Unsupported database manifest");
         if(!exists)for(const auto& entry:fs::directory_iterator(directory)){auto name=entry.path().filename().u8string();if(name.rfind("data-member-",0)==0||name=="control-media.json"||name=="control-media-redo.log")throw DbError("CORRUPT_CONTROL","Managed media exists without database manifest; refusing overwrite");}
         db_uuid=exists?c.at("uuid").get<std::string>():uuid();backup_configure(c,options);if(legacy_read_only){backup_role="RESTORED_READ_ONLY";backup_identity_upgrade=false;}
@@ -314,7 +338,7 @@ struct Storage::Impl {
             data=std::make_unique<ManagedBlockDevice>(directory.u8string(),db_uuid,ManagedMediaOptions{selected,members},!exists);
         }
         if(!exists){initialize();c=read_manifest(directory/"control.json");}
-        if(c.value("format","")!="EduDB"||c.value("version",0)!=4||c.value("page_format",0)!=3||c.value("minimum_reader_format",0)!=4||c.value("page_size",0)!=PAGE_SIZE)throw DbError("INCOMPATIBLE_FORMAT","Unsupported control4/page3 database format");
+        if(c.value("format","")!="EduDB"||c.value("version",0)!=4||c.value("page_format",0)!=3||!supported_catalog_reader(c)||c.value("page_size",0)!=PAGE_SIZE)throw DbError("INCOMPATIBLE_FORMAT","Unsupported control4/page3 database format");
         db_uuid=c.at("uuid");generation=c.at("wal_generation");checkpoint_lsn=c.at("checkpoint_lsn");durable_lsn=checkpoint_lsn;next_lsn=checkpoint_lsn+1;
         next_page=std::max(c.at("next_page_id").get<std::uint64_t>(),(data->size()+PAGE_SIZE-1)/PAGE_SIZE);next_tx=c.value("next_tx_id",std::uint64_t(1));Page super{};data->read(0,super.data(),super.size());
         if(!valid_page(super,0)||get16(super.data()+6)!=TYPE_SUPER||parse_json(slot(super,0)).value("uuid","")!=db_uuid)throw DbError("CORRUPT_PAGE","Superblock/UUID mismatch");
@@ -339,9 +363,12 @@ struct Storage::Impl {
     }
     fs::path wal_path(std::uint64_t gen)const{return directory/("wal-"+std::to_string(gen)+".log");}
     std::array<unsigned char,64> wal_header(std::uint64_t gen,std::uint64_t base){std::array<unsigned char,64> h{};std::memcpy(h.data(),"EDUWAL3",7);std::memcpy(h.data()+8,db_uuid.data(),32);put64(h.data()+40,gen);put64(h.data()+48,base);put32(h.data()+60,crc32(h.data(),h.size()));return h;}
-    json control(std::uint64_t gen,std::uint64_t lsn){return backup_control({{"format","EduDB"},{"version",4},{"page_format",3},{"minimum_reader_format",4},{"page_size",PAGE_SIZE},{"uuid",db_uuid},{"recovery_mode",logical_mode?"ARIES_LOGICAL":aries_mode?"ARIES_PAGE":"REDO_PRIVATE"},{"aries_steal",aries_options.steal},{"aries_force_at_commit",aries_options.force_at_commit},{"wal_generation",gen},{"checkpoint_lsn",lsn},{"next_page_id",next_page.load()},{"next_tx_id",next_tx.load()},{"data_layout",data_layout}});}
+    json control(std::uint64_t gen,std::uint64_t lsn){return backup_control({{"format","EduDB"},{"version",4},{"page_format",3},{"minimum_reader_format",minimum_reader},{"sql_catalog_revision",minimum_reader==5?1:0},{"page_size",PAGE_SIZE},{"uuid",db_uuid},{"recovery_mode",logical_mode?"ARIES_LOGICAL":aries_mode?"ARIES_PAGE":"REDO_PRIVATE"},{"aries_steal",aries_options.steal},{"aries_force_at_commit",aries_options.force_at_commit},{"wal_generation",gen},{"checkpoint_lsn",lsn},{"next_page_id",next_page.load()},{"next_tx_id",next_tx.load()},{"data_layout",data_layout}});}
     void initialize(){auto p=empty_page(0,TYPE_SUPER);append_slot(p,json({{"uuid",db_uuid},{"page_size",PAGE_SIZE},{"format_version",3}}).dump());seal(p,0);data->write(0,p.data(),p.size());p=empty_page(1,TYPE_CATALOG);append_slot(p,"{}");seal(p,0);data->write(PAGE_SIZE,p.data(),p.size());data->sync();if(!aries_mode){auto h=wal_header(1,0);NativeFile f(wal_path(1),true,true);f.write(0,h.data(),h.size());f.sync();}sync_directory(directory);atomic_manifest(directory,control(1,0));}
     void require(const std::shared_ptr<Transaction>& tx){if(failed)throw DbError("RECOVERY_REQUIRED","Storage fail-stop; restart required");if(!tx||!tx->state||tx->state->owner!=this||!tx->state->active)throw DbError("NO_TRANSACTION","Inactive transaction/wrong storage owner");if(tx->state->aborted)throw DbError("TRANSACTION_ABORTED","Private write failed; rollback required");}
+    void require_extended_catalog()const{
+        if(minimum_reader<5)throw DbError("CATALOG_MIGRATION_REQUIRED","Use migrate-v4 to copy this database into a 4.1 directory before adding CHECK, foreign keys or statistics objects");
+    }
     void require_writable()const{if(legacy_read_only)throw DbError("READ_ONLY_DATABASE","Legacy control3 is mounted read-only; use migrate-v3 into a new directory");}
     void finish(const std::shared_ptr<Transaction>& tx){protocol_finish(tx);tx->state->last_pages=aries_mode?tx->state->aries_pages.size():tx->state->pages.size();tx->state->aries_pages.clear();tx->state->last_page_types=tx->state->private_page_types;tx->state->private_page_types.fill(0);tx->state->active=false;tx->state->pages.clear();tx->state->changefeed.clear();tx->state->new_pages.clear();tx->state->descriptors.clear();tx->state->descriptor_names.clear();tx->state->dirty_descriptors.clear();tx->state->ch10_layout_touched.clear();tx->state->ch10_physical_cache.clear();{std::lock_guard<std::mutex> g(registry_mutex);active.erase(tx->id);}registry_cv.notify_all();}
     void private_page(const std::shared_ptr<Transaction>& tx,PageId id,Page p){require_writable();if(!(logical_mode&&tx->state->logical_staging&&tx->state->logical_compensating))backup_private_write_guard(tx);if(logical_mode&&tx->state->logical_staging){logical_stage_page(tx,id,std::move(p));return;}if(logical_mode&&tx->state->logical_kind!="physical")throw DbError("LOGICAL_UNSUPPORTED","Unjournaled page write rejected");if(aries_mode){aries_write_page(tx,id,std::move(p));return;}if(!tx->state->pages.count(id)&&(tx->state->pages.size()+1)>private_limit/PAGE_SIZE){tx->state->aborted=true;throw DbError("TRANSACTION_TOO_LARGE","Private page-image limit exceeded");}protocol_record_private_write(tx,id);auto type=get16(p.data()+6);if(type>=tx->state->private_page_types.size())throw DbError("INTERNAL_ERROR","Invalid private page type");auto old=tx->state->pages.find(id);auto previous=old==tx->state->pages.end()?0:get16(old->second.data()+6);tx->state->pages[id]=std::move(p);if(previous)--tx->state->private_page_types[previous];++tx->state->private_page_types[type];}
@@ -393,6 +420,7 @@ struct Storage::Impl {
             wal->truncate(last_commit);wal->sync();truncated_tail=true;next_lsn=durable_lsn+1;
         }
     }
+#include "storage_group_commit.inc"
 };
 Storage::Storage(const std::string& d,std::size_t f,std::size_t p,const StorageOptions& options):impl_(new Impl(d,f,p,options)){}
 bool Storage::recovery_required()const{return impl_->failed.load();}
@@ -415,7 +443,7 @@ json Storage::media_maintenance(const std::string& directory,const json& request
     for(auto it=request.begin();it!=request.end();++it)if(it.key()!="action"&&it.key()!="member")throw DbError("ARGUMENT","Unknown media maintenance option");
     auto action=request.value("action",std::string("status"));if(action!="status"&&action!="scrub"&&action!="rebuild")throw DbError("ARGUMENT","Media action requires status, scrub or rebuild");
     auto path=fs::absolute(fs::u8path(directory)).lexically_normal();if(!fs::is_directory(path))throw DbError("ARGUMENT","Existing database directory required");NativeFile exclusive(path/"database.lock",false,false,true,false,true);IoScope scope("offline media maintenance");auto c=read_manifest(path/"control.json");
-    if(c.value("version",0)==3)throw DbError("READ_ONLY_DATABASE","Legacy control3 requires offline migrate-v3 before media writes");if(c.value("format",std::string())!="EduDB"||c.value("version",0)!=4||c.value("page_format",0)!=3||c.value("minimum_reader_format",0)!=4)throw DbError("INCOMPATIBLE_FORMAT","Unsupported control4/page3 format");auto layout=c.value("data_layout",json{{"kind","single"}});if(layout.value("kind",std::string())!="managed")throw DbError("MEDIA_OPTION","Managed member-file database required");if(layout.value("format",std::string())!="edudb-managed-media-v1")throw DbError("INCOMPATIBLE_FORMAT","Unsupported media format");
+    if(c.value("version",0)==3)throw DbError("READ_ONLY_DATABASE","Legacy control3 requires offline migrate-v3 before media writes");if(c.value("format",std::string())!="EduDB"||c.value("version",0)!=4||c.value("page_format",0)!=3||!supported_catalog_reader(c))throw DbError("INCOMPATIBLE_FORMAT","Unsupported control4/page3 format");auto layout=c.value("data_layout",json{{"kind","single"}});if(layout.value("kind",std::string())!="managed")throw DbError("MEDIA_OPTION","Managed member-file database required");if(layout.value("format",std::string())!="edudb-managed-media-v1")throw DbError("INCOMPATIBLE_FORMAT","Unsupported media format");
     ManagedBlockDevice media(path.u8string(),c.at("uuid").get<std::string>(),ManagedMediaOptions{layout.at("layout").get<std::string>(),layout.at("members").get<std::size_t>()},false);json result={{"status","PASS"}};
     if(action=="scrub")result=media.scrub();else if(action=="rebuild"){if(!request.contains("member")||!request["member"].is_number_unsigned())throw DbError("ARGUMENT","Rebuild requires a nonnegative unsigned member number");result=media.rebuild(request["member"].get<std::size_t>());}else if(request.contains("member"))throw DbError("ARGUMENT","Member option only applies to rebuild");
     return {{"result",result},{"configuration",media.configuration()},{"diagnostics",media.diagnostics()},{"core_recovery","not performed; start database to replay database WAL"},{"io",scope.snapshot()}};
@@ -465,12 +493,18 @@ void Storage::commit(const std::shared_ptr<Transaction>& tx){auto& s=*impl_;if(!
     std::optional<recovery::FencePermit> backup_gate;
     try{
         s.flush_descriptors(tx);
+        if(s.group_size>1 && !tx->state->pages.empty() &&
+           tx->state->protocol->options.protocol==TransactionProtocol::Strict2PL &&
+           !tx->state->protocol->options.record_locks){
+            s.group_commit(tx);
+            return;
+        }
         backup_gate=s.backup_commit_gate(!tx->state->pages.empty()||!tx->state->aries_pages.empty()||(tx->state->protocol&&!tx->state->protocol->write_tables.empty()));
     }catch(...){
         // A preceding writer can fail while this commit waits for admission.
         // No page from this private transaction has reached WAL/publication.
         // Discard it and unregister; do not leave a failed commit active.
-        if(s.failed){++s.failed_pre_wal_commits;s.finish(tx);}throw;
+        if(s.failed && tx->state->active){++s.failed_pre_wal_commits;s.finish(tx);}throw;
     }
     struct CommitterGuard{std::atomic<std::uint64_t>& count;explicit CommitterGuard(std::atomic<std::uint64_t>& c):count(c){++count;}~CommitterGuard(){--count;}} committer(s.wal_committers);
     std::lock_guard<std::mutex> wl(s.wal_mutex);
@@ -479,7 +513,7 @@ void Storage::commit(const std::shared_ptr<Transaction>& tx){auto& s=*impl_;if(!
     std::optional<Impl::ProtocolCommit> protocol_commit;
     try{protocol_commit.emplace(s.protocol_prepare_commit(tx));if(tx->state->pages.empty()){s.protocol_complete_commit(*protocol_commit);++s.commits;s.finish(tx);return;}
         std::optional<buffer::BufferPool::Publication> publication;try{publication.emplace(s.buffer->reserve_publication(5000));}catch(const buffer::Error& e){throw DbError(e.code,e.what());}
-        std::vector<PageId> ids;for(const auto& p:tx->state->pages)ids.push_back(p.first);std::sort(ids.begin(),ids.end());attempted=true;s.append_record(1,s.next_lsn++,tx,{});std::uint32_t digest=0;for(auto id:ids){auto& p=tx->state->pages.at(id);auto lsn=s.next_lsn++;seal(p,lsn);digest=Impl::digest_page(digest,p);std::vector<unsigned char> bytes(PAGE_SIZE+8);put64(bytes.data(),id);std::copy(p.begin(),p.end(),bytes.begin()+8);s.append_record(2,lsn,tx,bytes);}std::vector<unsigned char> end(8);put32(end.data(),static_cast<std::uint32_t>(ids.size()));put32(end.data()+4,digest);auto lsn=s.next_lsn++;s.append_record(3,lsn,tx,end);crash_at("wal_before_sync");s.inject("wal_sync_once");s.wal->sync();++s.wal_forces;s.durable_lsn=lsn;crash_at("after_wal_sync");
+        std::vector<PageId> ids;for(const auto& p:tx->state->pages)ids.push_back(p.first);std::sort(ids.begin(),ids.end());attempted=true;auto lsn=s.append_private_transaction(tx,ids);crash_at("wal_before_sync");s.inject("wal_sync_once");s.wal->sync();++s.wal_forces;s.durable_lsn=lsn;crash_at("after_wal_sync");
         s.protocol_publish_versions(tx,*protocol_commit);
         for(auto id:ids)publication->publish(id,tx->state->pages.at(id));publication->finish();
         if(const char* p=std::getenv("EDUDB_CRASH_AT"))if(std::strcmp(p,"after_page_flush")==0)s.buffer->flush_one();
@@ -502,6 +536,32 @@ json Storage::read_table(const std::shared_ptr<Transaction>& tx,const std::strin
     for(auto& ix:t["index_stats"]){ix["entries"]=ix.value("count",std::uint64_t(0));ix["root_page"]=ix.value("root",std::uint64_t(0));ix["column"]=ix.value("column",std::string());}
     if(include_rows){t["rows"]=json::array();t["row_ids"]=json::array();auto c=scan(tx,name);StoredRow r;while(c->next(r)){t["rows"].push_back(r.values);t["row_ids"].push_back(r.id.logical_id);}}
     return t;
+}
+void Storage::set_statistics_definitions(const std::shared_ptr<Transaction>& tx,const std::string& name,const json& definitions){
+    impl_->require_extended_catalog();
+    if(!tx||!tx->state)throw DbError("NO_TRANSACTION","No transaction");
+    auto& s=*impl_;
+    std::lock_guard<std::recursive_mutex> guard(tx->state->mutex);
+    s.require_writable();s.require(tx);
+    Impl::BackupWriteOperation operation(s,tx);
+    if(s.logical_mode)throw DbError("LOGICAL_UNSUPPORTED","Extended statistics are unavailable in logical experiment mode");
+    auto pair=s.descriptor(tx,name);
+    auto& desc=pair.second;
+    if(!definitions.is_object()||definitions.size()>32)throw DbError("STATISTICS_LIMIT_EXCEEDED","At most 32 statistics definitions per table");
+    // Never refresh the version stamp here: old data distributions must stay stale.
+    if(desc.contains("statistics")&&desc["statistics"].contains("joint_mcv")){
+        auto& collected=desc["statistics"]["joint_mcv"];
+        for(auto it=collected.begin();it!=collected.end();){
+            if(!definitions.contains(it.key())||definitions.at(it.key())!=it->at("columns"))it=collected.erase(it);
+            else ++it;
+        }
+    }
+    if(definitions.empty())desc["meta"].erase("statistics_definitions");
+    else desc["meta"]["statistics_definitions"]=definitions;
+    s.save_desc(tx,pair.first,desc);
+    // The catalog update makes a global name conflict a real shared page
+    // conflict for old snapshot writers, including when their tables differ.
+    s.set_cluster_route(tx,name,desc.at("meta"));
 }
 void Storage::set_statistics(const std::shared_ptr<Transaction>& tx,const std::string& name,const json& statistics){impl_->require_writable();
     if(!tx||!tx->state)throw DbError("NO_TRANSACTION","No transaction");
@@ -545,7 +605,7 @@ json Storage::diagnostics(){
     for(const auto& f:s.buffer->snapshot(64)){const auto& p=f.image;pages.push_back({{"id",f.id},{"type",get16(p.data()+6)},{"lsn",get64(p.data()+16)},{"dirty",f.dirty},{"pins",f.pins},{"prefetched",f.prefetched},{"reserved",f.reserved},{"slots",get16(p.data()+32)}});if(get16(p.data()+6)==TYPE_BTREE){auto n=parse_json(slot(p,0));n["page_id"]=f.id;n["owner"]=get64(p.data()+40);nodes.push_back(n);}}
 
     json media={{"configuration",{{"layout","SINGLE"}}},{"data_layout",s.data_layout}};if(auto* device=dynamic_cast<ManagedBlockDevice*>(s.data.get())){media["configuration"]=device->configuration();media["diagnostics"]=device->diagnostics();}
-    return s.backup_diagnostics({{"media",media},{"transactions",s.protocol_diagnostics()},{"stale_query_files_removed",s.stale_query_files_removed},{"unrecognized_query_files_retained",s.unrecognized_query_files_retained},{"stale_sort_files_removed",s.stale_sort_files_removed},{"unrecognized_sort_files_retained",s.unrecognized_sort_files_retained},{"io",io_snapshot(s.directory)},{"format_version",s.legacy_read_only?3:4},{"page_format",3},{"read_only",s.legacy_read_only},{"legacy_source",s.legacy_snapshot?s.legacy_snapshot->source().u8string():std::string()},{"recovery_scope",s.legacy_read_only?"owned snapshot copy only; source locked and unchanged":"database directory"},{"page_size",PAGE_SIZE},{"buffer_pool_frames",s.frame_limit},{"resident_frames",count},{"dirty_frames",dirty},{"private_page_limit_bytes",s.private_limit},{"active_transactions",active},{"next_page_id",s.next_page.load()},{"wal_generation",s.generation},{"wal_bytes",s.wal->size()},{"durable_lsn",s.durable_lsn.load()},{"checkpoint_lsn",s.checkpoint_lsn},{"buffer_hits",bs.demand_hits},{"buffer_policy",buffer::policy_name(bs.config.policy)},{"buffer_live_guards",bs.live_guards},{"buffer_pinned_frames",bs.pinned_frames},{"buffer_guard_acquires",bs.guard_acquires},{"buffer_guard_releases",bs.guard_releases},{"buffer_pin_high_water",bs.pin_high_water},{"buffer_max_live_guards",bs.max_live_guards},{"buffer_busy_reads",bs.busy_reads},{"buffer_clock_scans",bs.clock_scans},{"buffer_clock_second_chances",bs.clock_second_chances},{"buffer_toss_immediate",bs.toss_immediate},{"buffer_toss_dirty_deferred",bs.toss_dirty_deferred},{"buffer_publication_reservations",bs.publication_reservations},{"buffer_publication_busy",bs.publication_busy},{"buffer_publication_pages",bs.publication_pages},{"buffer_publication_flushes",bs.publication_flushes},{"buffer_publication_active",bs.publication_active},{"buffer_prefetch_requested",bs.prefetch_requested},{"buffer_prefetch_loaded",bs.prefetch_loaded},{"buffer_prefetch_already_resident",bs.prefetch_already_resident},{"buffer_prefetch_useful",bs.prefetch_useful},{"buffer_prefetch_wasted",bs.prefetch_wasted},{"buffer_prefetch_skipped_busy",bs.prefetch_skipped_busy},{"buffer_read_ahead_pages",bs.config.read_ahead_pages},{"buffer_wait_ms",bs.config.wait_ms},{"buffer_io_failures",bs.io_failures},{"buffer_policy_changes",bs.policy_changes},{"buffer_misses",bs.demand_misses},{"evictions",bs.evictions},{"page_writes",s.writes.load()},{"commits",s.commits.load()},{"rollbacks",s.rollbacks.load()},{"wal_forces",s.wal_forces.load()},{"recovered_pages",s.recovered.load()},{"wal_tail_truncated",s.truncated_tail},{"index_page_reads",s.index_reads.load()},{"heap_page_reads",s.heap_reads.load()},{"splits",s.splits.load()},{"merges",s.merges.load()},{"redistributions",s.redistributions.load()},{"root_shrinks",s.root_shrinks.load()},{"retired_pages",s.retired.load()},{"test_io_faults",s.io_faults.load()},{"failed_waiting_writers",s.failed_waiters.load()},{"failed_pre_wal_commits",s.failed_pre_wal_commits.load()},{"recovery_required",s.failed.load()},{"allocator","monotonic; retired whole pages are not reused"},{"buffer",{{"frames",s.frame_limit},{"resident",count},{"dirty",dirty},{"hits",bs.demand_hits},{"misses",bs.demand_misses},{"evictions",bs.evictions}}},{"wal",{{"generation",s.generation},{"bytes",s.wal->size()},{"durable_lsn",s.durable_lsn.load()},{"checkpoint_lsn",s.checkpoint_lsn},{"forces",s.wal_forces.load()}}},{"pages",pages},{"index_nodes",nodes}});
+    return s.backup_diagnostics({{"media",media},{"transactions",s.protocol_diagnostics()},{"stale_query_files_removed",s.stale_query_files_removed},{"unrecognized_query_files_retained",s.unrecognized_query_files_retained},{"stale_sort_files_removed",s.stale_sort_files_removed},{"unrecognized_sort_files_retained",s.unrecognized_sort_files_retained},{"io",io_snapshot(s.directory)},{"format_version",s.legacy_read_only?3:4},{"page_format",3},{"read_only",s.legacy_read_only},{"legacy_source",s.legacy_snapshot?s.legacy_snapshot->source().u8string():std::string()},{"recovery_scope",s.legacy_read_only?"owned snapshot copy only; source locked and unchanged":"database directory"},{"page_size",PAGE_SIZE},{"buffer_pool_frames",s.frame_limit},{"resident_frames",count},{"dirty_frames",dirty},{"private_page_limit_bytes",s.private_limit},{"active_transactions",active},{"next_page_id",s.next_page.load()},{"wal_generation",s.generation},{"wal_bytes",s.wal->size()},{"durable_lsn",s.durable_lsn.load()},{"checkpoint_lsn",s.checkpoint_lsn},{"buffer_hits",bs.demand_hits},{"buffer_policy",buffer::policy_name(bs.config.policy)},{"buffer_live_guards",bs.live_guards},{"buffer_pinned_frames",bs.pinned_frames},{"buffer_guard_acquires",bs.guard_acquires},{"buffer_guard_releases",bs.guard_releases},{"buffer_pin_high_water",bs.pin_high_water},{"buffer_max_live_guards",bs.max_live_guards},{"buffer_busy_reads",bs.busy_reads},{"buffer_clock_scans",bs.clock_scans},{"buffer_clock_second_chances",bs.clock_second_chances},{"buffer_toss_immediate",bs.toss_immediate},{"buffer_toss_dirty_deferred",bs.toss_dirty_deferred},{"buffer_publication_reservations",bs.publication_reservations},{"buffer_publication_busy",bs.publication_busy},{"buffer_publication_pages",bs.publication_pages},{"buffer_publication_flushes",bs.publication_flushes},{"buffer_publication_active",bs.publication_active},{"buffer_prefetch_requested",bs.prefetch_requested},{"buffer_prefetch_loaded",bs.prefetch_loaded},{"buffer_prefetch_already_resident",bs.prefetch_already_resident},{"buffer_prefetch_useful",bs.prefetch_useful},{"buffer_prefetch_wasted",bs.prefetch_wasted},{"buffer_prefetch_skipped_busy",bs.prefetch_skipped_busy},{"buffer_read_ahead_pages",bs.config.read_ahead_pages},{"buffer_wait_ms",bs.config.wait_ms},{"buffer_io_failures",bs.io_failures},{"buffer_policy_changes",bs.policy_changes},{"buffer_misses",bs.demand_misses},{"evictions",bs.evictions},{"page_writes",s.writes.load()},{"commits",s.commits.load()},{"rollbacks",s.rollbacks.load()},{"wal_forces",s.wal_forces.load()},{"group_commit",{{"max_batch",s.group_size},{"wait_us",s.group_wait_us},{"syncs",s.group_syncs},{"transactions",s.group_transactions},{"largest_batch",s.group_peak},{"shared_sync_attribution","one native sync charged to its issuing request"}}},{"recovered_pages",s.recovered.load()},{"wal_tail_truncated",s.truncated_tail},{"index_page_reads",s.index_reads.load()},{"heap_page_reads",s.heap_reads.load()},{"splits",s.splits.load()},{"merges",s.merges.load()},{"redistributions",s.redistributions.load()},{"root_shrinks",s.root_shrinks.load()},{"retired_pages",s.retired.load()},{"test_io_faults",s.io_faults.load()},{"failed_waiting_writers",s.failed_waiters.load()},{"failed_pre_wal_commits",s.failed_pre_wal_commits.load()},{"recovery_required",s.failed.load()},{"allocator","monotonic; retired whole pages are not reused"},{"buffer",{{"frames",s.frame_limit},{"resident",count},{"dirty",dirty},{"hits",bs.demand_hits},{"misses",bs.demand_misses},{"evictions",bs.evictions}}},{"wal",{{"generation",s.generation},{"bytes",s.wal->size()},{"durable_lsn",s.durable_lsn.load()},{"checkpoint_lsn",s.checkpoint_lsn},{"forces",s.wal_forces.load()}}},{"pages",pages},{"index_nodes",nodes}});
 }
 json Storage::checkpoint(int timeout_ms){impl_->require_writable();auto& s=*impl_;if(s.aries_mode){auto backup_gate=s.backup_commit_gate(true);return s.aries_checkpoint();}std::unique_lock<std::mutex> r(s.registry_mutex);if(s.failed)throw DbError("RECOVERY_REQUIRED","Storage requires recovery");if(s.checkpoint_requested)throw DbError("CHECKPOINT_BUSY","Another checkpoint running");s.checkpoint_requested=true;
     if(!s.registry_cv.wait_for(r,std::chrono::milliseconds(std::max(0,timeout_ms)),[&]{return s.active.empty();})){s.checkpoint_requested=false;r.unlock();s.registry_cv.notify_all();throw DbError("CHECKPOINT_BUSY","Active transactions prevented checkpoint");}

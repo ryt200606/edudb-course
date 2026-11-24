@@ -42,19 +42,29 @@ json Engine::import_data(const std::string& id,const json& request){
             auto name=request_string(request,"table",true);auto parsed=interchange::parse_csv(content);
             impl_->start_transaction(*session);owned=true;if(session->active_options.protocol==TransactionProtocol::Tree)fail("TREE_UNSUPPORTED","TREE import/export requires unrestricted accesses and is explicitly rejected");
             Statement access;access.kind="INSERT";access.table=name;impl_->before_statement(*session,access);
-            impl_->acquire(*session,"catalog",false);impl_->acquire(*session,"table:"+name,true);
-            impl_->materialized_write_guard(*session,name);auto t=impl_->table(*session,name,false);std::vector<int> targets;std::size_t first=0;
+            impl_->acquire(*session,"catalog",false);json write_features=json::object();
+            impl_->materialized_write_guard(*session,name,&write_features);impl_->integrity_lock(*session,name,"INSERT",write_features);
+            impl_->acquire(*session,"table:"+name,true);auto t=impl_->table(*session,name,false);
+            auto rules=impl_->bind_integrity(*session,name,t);std::vector<int> targets;std::size_t first=0;
             if(request.value("header",true)&&!parsed.empty()){
                 std::set<std::string> names;for(auto& c:parsed[0]){if(c.is_null||!names.insert(c.text).second)fail("DUPLICATE_COLUMN","CSV header names must be unique and non-NULL");targets.push_back(column_id(t,c.text));}first=1;
             }else for(std::size_t i=0;i<t["columns"].size();++i)targets.push_back(static_cast<int>(i));
-            for(std::size_t i=first;i<parsed.size();++i){line=i+1;if(parsed[i].size()!=targets.size())fail("COLUMN_COUNT_MISMATCH","CSV row width differs from header/schema");json row=json::array();for(auto& c:t["columns"])row.push_back(c["default"]);for(std::size_t c=0;c<targets.size();++c)row[targets[c]]=import_cell(parsed[i][c],t["columns"][targets[c]]);impl_->storage.insert_row(session->tx,name,validate_row(row,t["columns"]));result["affected_rows"]=result["affected_rows"].get<std::uint64_t>()+1;}
+            auto csv_row=[&](std::size_t i){
+                line=i+1;if(parsed[i].size()!=targets.size())fail("COLUMN_COUNT_MISMATCH","CSV row width differs from header/schema");
+                json row=json::array();for(const auto& c:t["columns"])row.push_back(c["default"]);
+                for(std::size_t c=0;c<targets.size();++c)row[targets[c]]=import_cell(parsed[i][c],t["columns"][targets[c]]);
+                return validate_row(row,t["columns"]);
+            };
+            for(std::size_t i=first;i<parsed.size();++i){impl_->storage.insert_row(session->tx,name,csv_row(i));result["affected_rows"]=result["affected_rows"].get<std::uint64_t>()+1;}
+            if(!rules.checks.empty()||!rules.outgoing.empty())
+                for(std::size_t i=first;i<parsed.size();++i)impl_->integrity_check_row(*session,rules,csv_row(i));
             if(result["affected_rows"].get<std::uint64_t>())result["materialized_refreshes"]=impl_->materialized_maintain(*session,{name});
         }else{
             auto scripts=interchange::split_sql_script(content);if(scripts.size()>100000)fail("IMPORT_LIMIT_EXCEEDED","SQL import exceeds 100000 statements");
             std::size_t ast_nodes=0,parsed_estimate=content.size()*2;std::vector<Statement> statements;
             for(auto& text:scripts){
                 ++line;if(ast_nodes>=input::sql_ast_node_limit)fail("IMPORT_RESOURCE","SQL import AST forest exceeds250000 nodes",0);
-                auto st=Parser(text).parse();static const std::set<std::string> allowed={"CREATE_CLUSTER","DROP_CLUSTER","CREATE_TABLE","DROP_TABLE","ALTER_TABLE","CREATE_INDEX","DROP_INDEX","REINDEX","REORGANIZE","INSERT","UPDATE","DELETE","TRUNCATE","CREATE_MATERIALIZED_VIEW","DROP_MATERIALIZED_VIEW","REFRESH_MATERIALIZED_VIEW"};if(!allowed.count(st.kind))fail("INVALID_IMPORT_STATEMENT","SQL import accepts DDL/DML only; no transaction control, SELECT or CHECKPOINT");
+                auto st=Parser(text).parse();static const std::set<std::string> allowed={"CREATE_STATISTICS","DROP_STATISTICS","CREATE_CLUSTER","DROP_CLUSTER","CREATE_TABLE","DROP_TABLE","ALTER_TABLE","CREATE_INDEX","DROP_INDEX","REINDEX","REORGANIZE","INSERT","UPDATE","DELETE","TRUNCATE","CREATE_MATERIALIZED_VIEW","DROP_MATERIALIZED_VIEW","REFRESH_MATERIALIZED_VIEW"};if(!allowed.count(st.kind))fail("INVALID_IMPORT_STATEMENT","SQL import accepts DDL/DML only; no transaction control, SELECT or CHECKPOINT");
                 if(st.input_ast_nodes>input::sql_ast_node_limit-ast_nodes)fail("IMPORT_RESOURCE","SQL import AST forest exceeds250000 nodes",0);
                 if(st.input_ast_estimated_bytes>input::sql_import_ast_estimate_limit-parsed_estimate)fail("IMPORT_RESOURCE","SQL import cumulative parsed allocation estimate exceeds384 MiB (not RSS)",0);
                 ast_nodes+=st.input_ast_nodes;parsed_estimate+=st.input_ast_estimated_bytes;statements.push_back(std::move(st));
@@ -109,9 +119,17 @@ json Engine::export_data(const std::string& id,const json& request){
             for(auto& n:names){auto metadata=impl_->table(*session,n,false);if(metadata.contains("cluster")){cluster_names.insert(metadata["cluster"]["name"].get<std::string>());attachments.emplace_back(n,metadata["cluster"]);}}
             for(const auto& cluster:cluster_names)content+="CREATE CLUSTER "+interchange::quote_identifier(cluster)+";\n";
             std::size_t raw_bytes=0;
+            std::string constraint_sql;
             std::vector<std::pair<std::string,json>> materialized_exports;
-            for(auto& n:names){auto t=impl_->table(*session,n,false);if(Impl::materialized_metadata(t)){if(!name.empty())fail("MATERIALIZED_EXPORT_REQUIRES_DATABASE","Export the full database to include materialized-view dependencies");rows+=t.value("row_count",std::uint64_t(0));if(rows>1000000)fail("EXPORT_LIMIT_EXCEEDED","Logical export exceeds1000000 rows");materialized_exports.emplace_back(n,t);continue;}t["rows"]=json::array();auto cursor=impl_->storage.scan(session->tx,n);StoredRow row;while(cursor->next(row)){raw_bytes+=row.values.dump().size();++rows;if(raw_bytes>interchange_limit||rows>1000000)fail("EXPORT_LIMIT_EXCEEDED","Logical export exceeds 64 MiB or 1000000 rows");t["rows"].push_back(row.values);}t.erase("cluster");content+=interchange::dump_table(n,t);if(content.size()>interchange_limit)fail("EXPORT_LIMIT_EXCEEDED","Encoded logical export exceeds 64 MiB");}
+            for(auto& n:names){auto t=impl_->table(*session,n,false);if(Impl::materialized_metadata(t)){if(!name.empty())fail("MATERIALIZED_EXPORT_REQUIRES_DATABASE","Export the full database to include materialized-view dependencies");rows+=t.value("row_count",std::uint64_t(0));if(rows>1000000)fail("EXPORT_LIMIT_EXCEEDED","Logical export exceeds1000000 rows");materialized_exports.emplace_back(n,t);continue;}t["rows"]=json::array();auto cursor=impl_->storage.scan(session->tx,n);StoredRow row;while(cursor->next(row)){raw_bytes+=row.values.dump().size();++rows;if(raw_bytes>interchange_limit||rows>1000000)fail("EXPORT_LIMIT_EXCEEDED","Logical export exceeds 64 MiB or 1000000 rows");t["rows"].push_back(row.values);}t.erase("cluster");
+                if(t.contains("integrity")){
+                    for(const auto& rule:t["integrity"])if(!name.empty()&&rule.at("kind")=="foreign"&&rule.at("parent")!=n)
+                        fail("EXPORT_DEPENDENCY","Export the full database to include referenced tables");
+                    constraint_sql+=interchange::dump_constraints(n,t["integrity"]);t.erase("integrity");
+                }
+                content+=interchange::dump_table(n,t);if(content.size()>interchange_limit)fail("EXPORT_LIMIT_EXCEEDED","Encoded logical export exceeds 64 MiB");}
             for(const auto& attachment:attachments){content+="ALTER TABLE "+interchange::quote_identifier(attachment.first)+" CLUSTER "+interchange::quote_identifier(attachment.second.at("name").get<std::string>())+"(";bool first=true;for(const auto& column:attachment.second.at("columns")){if(!first)content+=", ";first=false;content+=interchange::quote_identifier(column.get<std::string>());}content+=");\n";}
+            content+=constraint_sql;
             for(const auto& view:materialized_exports){content+=impl_->materialized_dump(*session,view.first,view.second);if(content.size()>interchange_limit)fail("EXPORT_LIMIT_EXCEEDED","Encoded logical export exceeds64MiB");}
         }
         if(content.size()>interchange_limit)fail("EXPORT_LIMIT_EXCEEDED","Encoded export exceeds 64 MiB");
