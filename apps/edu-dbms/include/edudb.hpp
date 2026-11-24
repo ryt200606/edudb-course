@@ -91,6 +91,7 @@ public:
     json schema_features(const std::shared_ptr<Transaction>& tx);
     json read_table(const std::shared_ptr<Transaction>& tx, const std::string& name,
                     bool include_rows = true, bool include_physical = true);
+    json read_table_for_plan(const std::shared_ptr<Transaction>& tx, const std::string& name);
     void set_statistics_definitions(const std::shared_ptr<Transaction>& tx, const std::string& table, const json& definitions);
     void set_statistics(const std::shared_ptr<Transaction>& tx, const std::string& name, const json& statistics);
     void enable_changefeed(const std::shared_ptr<Transaction>& tx, const std::vector<std::string>& tables);
@@ -143,6 +144,9 @@ public:
     json recovery_identity();
     json checkpoint(int timeout_ms = 5000);
 private:
+    enum class PhysicalMetadata { Omit, Exact, Planner };
+    json table_metadata(const std::shared_ptr<Transaction>& tx, const std::string& name,
+                        bool include_rows, PhysicalMetadata detail);
     std::vector<std::uint64_t> bitmap_selection(const std::shared_ptr<Transaction>& tx, std::uint64_t owner, json& descriptor, const ScanSpec& spec);
     struct Impl;
     std::unique_ptr<Impl> impl_;

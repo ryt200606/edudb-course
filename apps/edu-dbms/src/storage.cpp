@@ -523,6 +523,12 @@ void Storage::commit(const std::shared_ptr<Transaction>& tx){auto& s=*impl_;if(!
 void Storage::rollback(const std::shared_ptr<Transaction>& tx){if(!tx||!tx->state)return;auto& s=*impl_;std::lock_guard<std::recursive_mutex> l(tx->state->mutex);if(tx->state->owner==&s&&tx->state->active){++s.rollbacks;if(s.logical_mode){try{s.logical_abort(tx);}catch(...){s.logical_fail();s.finish(tx);throw;}}else if(s.aries_mode){try{s.aries_abort(tx);}catch(...){s.aries_note_failure();s.finish(tx);throw;}}s.finish(tx);}}
 json Storage::catalog(const std::shared_ptr<Transaction>& tx){if(!tx||!tx->state)throw DbError("NO_TRANSACTION","No transaction");std::lock_guard<std::recursive_mutex> l(tx->state->mutex);impl_->require(tx);std::unique_lock<std::recursive_mutex> structure;if(impl_->logical_mode)structure=std::unique_lock<std::recursive_mutex>(impl_->logical_mutex);return impl_->read_catalog(tx);}
 json Storage::read_table(const std::shared_ptr<Transaction>& tx,const std::string& name,bool include_rows,bool include_physical){
+    return table_metadata(tx,name,include_rows,include_physical?PhysicalMetadata::Exact:PhysicalMetadata::Omit);
+}
+json Storage::read_table_for_plan(const std::shared_ptr<Transaction>& tx,const std::string& name){
+    return table_metadata(tx,name,false,PhysicalMetadata::Planner);
+}
+json Storage::table_metadata(const std::shared_ptr<Transaction>& tx,const std::string& name,bool include_rows,PhysicalMetadata detail){
     if(!tx||!tx->state)throw DbError("NO_TRANSACTION","No transaction");
     std::lock_guard<std::recursive_mutex> l(tx->state->mutex);auto& s=*impl_;s.require(tx);
     std::unique_lock<std::recursive_mutex> structure;if(s.logical_mode){structure=std::unique_lock<std::recursive_mutex>(s.logical_mutex);if(!tx->state->logical_staging&&tx->state->logical_kind!="physical")s.logical_clear(tx);}
@@ -532,7 +538,17 @@ json Storage::read_table(const std::shared_ptr<Transaction>& tx,const std::strin
     if(s.clustered(d)){t["heap_pages"]=s.cluster_organization_stats(tx,d).at("pages");t["heap_pages_shared"]=true;}
     for(const char* field:{"data_version","schema_version","physical_version"})t[field]=s.ch10_version(d,field);
     t["statistics"]=s.cluster_statistics(tx,d);t["statistics_versions"]=d.value("statistics_versions",json::object());
-    t["physical_stats"]=include_physical?s.ch10_physical(tx,pair.first,d):json{{"measurement_scope","not requested"}};t["index_stats"]=d.at("index_roots");
+    if(detail==PhysicalMetadata::Omit){
+        t["physical_stats"]={{"measurement_scope","not requested"}};
+    }else if(detail==PhysicalMetadata::Planner&&!s.clustered(d)&&s.org_method(d)=="HEAP"){
+        // The owning descriptor lists every private heap page in this read view.
+        // Index roots below already carry the height and cardinality used by the planner.
+        t["physical_stats"]={{"table_pages",t.at("heap_pages")},
+                             {"measurement_scope","exact standalone heap page count from table descriptor"}};
+    }else{
+        t["physical_stats"]=s.ch10_physical(tx,pair.first,d);
+    }
+    t["index_stats"]=d.at("index_roots");
     for(auto& ix:t["index_stats"]){ix["entries"]=ix.value("count",std::uint64_t(0));ix["root_page"]=ix.value("root",std::uint64_t(0));ix["column"]=ix.value("column",std::string());}
     if(include_rows){t["rows"]=json::array();t["row_ids"]=json::array();auto c=scan(tx,name);StoredRow r;while(c->next(r)){t["rows"].push_back(r.values);t["row_ids"].push_back(r.id.logical_id);}}
     return t;

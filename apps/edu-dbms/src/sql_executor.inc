@@ -63,7 +63,7 @@ json select(Session& session,Statement& statement,QueryBudget* shared_budget=nul
         if (!aliases.insert(source.alias).second) fail("DUPLICATE_ALIAS", "Duplicate alias: " + source.alias);
         offsets.push_back(int(schema.size()));
         auto metadata_before=storage.transaction_stats(session.tx);
-        auto metadata = table(session, source.table, false);
+        auto metadata = storage.read_table_for_plan(session.tx,source.table);
         auto metadata_after=storage.transaction_stats(session.tx);
         for(const char* counter:{"heap_page_reads","index_page_reads"})planning_metadata_io[counter]=planning_metadata_io.value(counter,std::uint64_t(0))+metadata_after.value(counter,std::uint64_t(0))-metadata_before.value(counter,std::uint64_t(0));
         auto columns = schema_for(metadata, source.alias);

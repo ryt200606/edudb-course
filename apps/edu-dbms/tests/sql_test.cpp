@@ -86,6 +86,22 @@ void planner_and_incremental_cases(Engine& db,const std::string& session) {
     for(int i=0;i<600;++i){if(i)sql+=",";sql+="("+std::to_string(i)+","+std::to_string(i%6)+","+std::to_string(i)+",'x')";}
     ok(db,session,sql);ok(db,session,"CREATE INDEX ix_plan_k ON plan_rows(k)");
     ok(db,session,"CREATE UNIQUE INDEX ix_plan_m ON plan_rows(m)");
+    for(int attempt=0;attempt<2;++attempt){
+        auto point=ok(db,session,"SELECT id FROM plan_rows WHERE id=599");
+        const auto& metrics=point.at("metrics");
+        auto index_reads=metrics.at("index_page_reads").get<std::uint64_t>();
+        check(point["rows"]==json::array({json::array({599})})&&point["plan"]["sources"][0]["scan"]=="IndexOnlyScan",
+              "Fresh transactions retain the primary covering lookup");
+        check(metrics["planning_metadata_io"]["index_page_reads"]==0&&index_reads>0&&index_reads<=4&&
+              metrics["heap_page_reads"]==0&&metrics["row_fetches"]==0&&metrics["cover_hits"]==1,
+              "A standalone heap point lookup does not traverse unrelated indexes to estimate table pages");
+    }
+    auto no_update=ok(db,session,"UPDATE plan_rows SET k=55 WHERE id=99999");
+    check(no_update["affected_rows"]==0&&no_update["metrics"]["index_page_reads"].get<std::uint64_t>()<=4&&
+          no_update["metrics"]["dirty_pages"]==0&&no_update["metrics"]["wal_bytes"]==0,
+          "Absent primary key UPDATE avoids full index inventory and writes no pages or WAL");
+    check(ok(db,session,"SELECT k FROM plan_rows WHERE id=599")["rows"]==json::array({json::array({5})}),
+          "Missing-key UPDATE preserves existing row");
     auto explain=ok(db,session,"EXPLAIN SELECT id FROM plan_rows WHERE k>=0 AND m=321");
     check(explain["plan"]["sources"][0]["index"]=="ix_plan_m","Planner must enumerate and choose unique equality over first broad index");
     check(explain["plan"]["sources"][0]["candidates"].size()==3,"Seq and both qualifying index candidates are visible");

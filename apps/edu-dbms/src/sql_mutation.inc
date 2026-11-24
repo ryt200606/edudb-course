@@ -3,7 +3,7 @@ json mutate(Session& session, Statement& statement,const json& write_features) {
     auto graph=integrity_lock(session,statement.table,statement.kind,write_features);
     const bool protected_table=graph.constrained.count(statement.table)!=0;
     if(!protected_table&&!try_record_locks(session,statement))acquire(session, "table:" + statement.table, true);
-    const auto metadata = table(session, statement.table, false);
+    const auto metadata = storage.read_table_for_plan(session.tx,statement.table);
     const auto columns = schema_for(metadata, statement.table);
     auto result = blank_result();
     std::size_t affected = 0;

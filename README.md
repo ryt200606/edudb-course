@@ -56,6 +56,25 @@ python3 tests/kernel_benchmark.py --exe .build/linux/edudb --label candidate --p
 
 每个规模从空库装载一次以准备封存夹具。正式批量写入在已有 1 千、1 万或 10 万行的库上再导入 1,000 行，每次恢复到同一关闭快照，独立重复 7 次。每种读查询分别收集 30 次重开后和 30 次立即重读的样本。开发者可换用自己的随机种子检查约束，`tests/course_integrity_model.py --help` 给出参数；每个事务结束后分别核对三张表的有序内容。
 
+### 分开观察查询规划与执行的页访问
+
+一条主键点查可以只访问四个 B+ 树索引页，同时在生成计划时产生更多读操作。`read_table_for_plan` 从普通堆表的事务内描述页读取精确堆页数，再从索引根取得规划所需信息。完整结构诊断会另外遍历索引页。[表描述页与规划读取](apps/edu-dbms/src/storage.cpp) · [回归断言](apps/edu-dbms/tests/sql_test.cpp)
+
+以下命令从 `apps/edu-dbms` 运行。第一步准备关闭的十万行数据库，第二步在它的副本上执行点查和连续二十个主键的范围查询。两条 SQL 都在自动提交、新显式事务、同一事务内重读三个条件下执行。[可重复的页访问探针](apps/edu-dbms/tests/planner_io_probe.py)
+
+```sh
+python3 tests/kernel_benchmark.py --exe .build/linux/edudb --label planner-probe --sizes 100000 --joint --prepare-only --output ./probe-fixture
+python3 tests/planner_io_probe.py --exe .build/linux/edudb --web ./web --fixture ./probe-fixture/fixtures/100000 --output ./probe-result.json
+```
+
+在同一份十万行快照上，两条查询的规划索引页访问均由 5,109 次降至 0 次，执行阶段均为 4 次。点查命中 1 条覆盖记录，范围扫描命中 20 条，两者回表均为 0 次。新事务的数据文件读取从 5,119 次降至 10 次，这里计量的是操作系统文件调用。范围条件 `id>=50000 AND id<50020` 的预计结果仍约为 25,009 行，实际为 20 行，反映了同一列上下界选择率近似的误差。
+
+也可以在同一套本机夹具上观察内存取舍。运行下列探针，将算子内存预算从 256 KiB 改到 8 MiB。十万行表与 512 行标签表的宽字段哈希连接在两次执行中产生相同聚合结果。小预算触发一次分区，临时文件写入 19,361,868 字节；大预算在内存中完成。输出还分别记录算子估计占用峰值与操作系统报告的整个服务进程驻留峰值。[内存与临时 I/O 探针](apps/edu-dbms/tests/join_memory_probe.py)
+
+```sh
+python3 tests/join_memory_probe.py --exe .build/linux/edudb --web ./web --fixture ./probe-fixture/fixtures/100000 --output ./join-memory.json
+```
+
 ### 在 Linux 重建对照版本
 
 4.0.0 原源码依赖 Windows 系统调用。Linux 对照采用同一版本的 SQL 和 WAL 代码，只移植文件操作、文件锁、摘要及本地账户目录访问涉及的五个文件。以下命令从本仓库根目录运行，需要完整 Git 历史、Python 3、GNU patch、CMake、Ninja 和 C++17 编译器。准备器会对照实际参与实验的源树核验 116 个输入，忽略文本换行差异。[可审查的移植补丁](benchmark-control/linux-4.0.patch) · [校验清单](benchmark-control/control.json)

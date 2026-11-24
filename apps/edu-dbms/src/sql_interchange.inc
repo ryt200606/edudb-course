@@ -44,7 +44,7 @@ json Engine::import_data(const std::string& id,const json& request){
             Statement access;access.kind="INSERT";access.table=name;impl_->before_statement(*session,access);
             impl_->acquire(*session,"catalog",false);json write_features=json::object();
             impl_->materialized_write_guard(*session,name,&write_features);impl_->integrity_lock(*session,name,"INSERT",write_features);
-            impl_->acquire(*session,"table:"+name,true);auto t=impl_->table(*session,name,false);
+            impl_->acquire(*session,"table:"+name,true);auto t=impl_->storage.read_table_for_plan(session->tx,name);
             auto rules=impl_->bind_integrity(*session,name,t);std::vector<int> targets;std::size_t first=0;
             if(request.value("header",true)&&!parsed.empty()){
                 std::set<std::string> names;for(auto& c:parsed[0]){if(c.is_null||!names.insert(c.text).second)fail("DUPLICATE_COLUMN","CSV header names must be unique and non-NULL");targets.push_back(column_id(t,c.text));}first=1;

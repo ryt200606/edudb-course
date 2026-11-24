@@ -68,7 +68,18 @@ void organizations(const fs::path& root){
     for(const std::string method:{"HEAP","ORDERED","BPLUS","HASH_STATIC","HASH_EXTENDIBLE","HASH_LINEAR"}){
         Storage db((root/fs::u8path(method)).u8string(),3);auto tx=db.begin();db.write_table(tx,"t",definition(method));
         for(int i=0;i<50;++i)db.insert_row(tx,"t",json::array({i,std::string(100,'a')}));
+        auto before=db.transaction_stats(tx).at("index_page_reads");
+        auto planned=db.read_table_for_plan(tx,"t");
+        if(method=="HEAP"){
+            require(before==db.transaction_stats(tx).at("index_page_reads"),"HEAP planner reads its owning descriptor");
+        }else{
+            require(planned.at("physical_stats").at("exact")&&planned.at("physical_stats").contains("row_map"),
+                    method+" retains full transaction-visible organization measurement");
+        }
         auto meta=db.read_table(tx,"t",false);auto shape=db.inspect(tx,"t","__organization",2048).at("structure");
+        require(planned["physical_stats"]["table_pages"]==meta["physical_stats"]["table_pages"]&&
+                planned["index_stats"]==meta["index_stats"]&&meta["physical_stats"].contains("row_map"),
+                method+" retains exact planner inputs and public diagnostics");
         require(meta["physical_stats"]["table_pages"]==shape["pages"].size(),method+" exact table organization pages");
         require(meta["physical_stats"]["table_pages"]>0,method+" nonzero physical pages");db.commit(tx);
     }
