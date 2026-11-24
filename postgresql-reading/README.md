@@ -1,5 +1,7 @@
 # PostgreSQL 14.11 专题实验
 
+在已安装 14.11 的练习库运行 `psql -X -d 库名 -f experiments/mechanisms.sql`，即可比较两种联合分布下的估计，并观察一次 UPDATE 怎样改变覆盖索引访问的 Heap Fetches。要重现保留旧快照的 VACUUM、真实等待环以及客户端未取回应答的提交，使用 [四项实验的独立集簇入口](experiments/README.md)。其中的 Python 脚本会新建集簇、核对行集并导出原始观察值。
+
 阅读基于上游 [PostgreSQL REL_14_11](https://github.com/postgres/postgres/tree/d1a2a93766b0a27eb4ffecdb63ed3879088dbfbe)。源代码属于 PostgreSQL 项目。课程分析脚本、SQL 和 GDB 文件位于本目录。[版本清单](source-lock.json) 记录使用的源码包和驱动版本。
 
 ### 索引计划

@@ -9,6 +9,7 @@ import socket
 import subprocess
 import tempfile
 import time
+import urllib.error
 import urllib.request
 
 
@@ -87,9 +88,12 @@ class Scenario:
     def mapped(self, path):
         return self.ws('wslpath','-u', Path(path).resolve().as_posix())
 
-    def start_primary(self):
-        self.primary = subprocess.Popen([str(self.windows),'serve','--data',str(self.db),'--port',str(self.win_port),
-            '--web', str(self.args.web.resolve())], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    def start_primary(self, directory=None, receiver_token=None):
+        command=[str(self.windows),'serve','--data',str(directory or self.db),'--port',str(self.win_port),
+                 '--web', str(self.args.web.resolve())]
+        if receiver_token:
+            command+=['--replica-port',str(self.receive),'--replication-token',receiver_token]
+        self.primary = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
         return session(self.win_port)
 
@@ -148,6 +152,99 @@ class Scenario:
         canonical=json.dumps(unsigned,sort_keys=True,separators=(',',':')).encode('utf-8')
         expected=hmac.new(bytes.fromhex(self.key.read_text('ascii')),canonical,hashlib.sha256).hexdigest()
         require(hmac.compare_digest(expected,actual),'Certificate differs from the independent HMAC-SHA256 implementation')
+
+    def restore_and_return(self, order, first_rows, first_ticket):
+        # The original Windows directory remains retired. Only its host rejoins.
+        def durable_image():
+            files=[self.db/'control.json',self.db/'data.pages',*self.db.glob('wal-*.log')]
+            return {f.name:hashlib.sha256(f.read_bytes()).hexdigest() for f in files}
+        original_image=durable_image()
+        rejoined=self.scratch/'windows-restored-from-linux'
+        staged=self.scratch/'return-backup'
+        token=secrets.token_hex(16)
+        source=self.start_replica(receive=False)
+        snapshot=sql(self.linux_port,source,"BACKUP DATABASE AS 'returnbase'")['recovery']
+        self.ws('cp','-a',snapshot['directory'],self.mapped(staged))
+        execute([self.windows,'restore','--source',staged,'--data',rejoined])
+        reader=self.start_primary(rejoined,token)
+        require(sql(self.win_port,reader,order)['rows']==first_rows,'Base restore differs from Linux owner')
+        sql(self.win_port,reader,"INSERT INTO witness VALUES(110,'standby rejects')",'STANDBY_READ_ONLY')
+        sql(self.linux_port,source,"INSERT INTO witness VALUES(101,'on Linux after backup'),(102,'second pending archive')")
+        latest=sql(self.linux_port,source,order)['rows']
+        require(len(latest)==len(first_rows)+2 and latest[:-2]==first_rows,'Linux WAL witness rows')
+        archive=sql(self.linux_port,source,'ARCHIVE WAL')['recovery']
+        local_dir=self.scratch/'return-archive'
+        local_dir.mkdir()
+        # WSL2 NAT exposes guest loopback to Windows. For the return leg,
+        # transfer the sealed files via the mount and use the host's loopback ship client.
+        marker_name=Path(archive['manifest_path']).name
+        archive_root=archive['manifest_path'].rsplit('/',1)[0]
+        self.ws('cp','--',archive['manifest_path'],archive_root+'/'+archive['file'],self.mapped(local_dir))
+        marker=local_dir/marker_name
+        for name in (marker_name,archive['file']):
+            require(hashlib.sha256((local_dir/name).read_bytes()).hexdigest()==
+                    self.ws('sha256sum',archive_root+'/'+name).split()[0],'Return archive transfer changed bytes')
+        def receive_status():
+            q=urllib.request.Request(f'http://127.0.0.1:{self.receive}/status',headers={'X-EduDB-Token':token})
+            with urllib.request.urlopen(q,timeout=8) as response:
+                j=json.load(response)
+                return {k:j[k] for k in ('received_lsn','forced_lsn','replayed_lsn')}
+        before=receive_status()
+        metadata=marker.read_bytes(); wal=(local_dir/archive['file']).read_bytes()
+        envelope=len(metadata).to_bytes(8,'little')+metadata+wal
+        rejected=urllib.request.Request(f'http://127.0.0.1:{self.receive}/receive',data=envelope,
+                     headers={'Content-Type':'application/octet-stream','X-EduDB-Token':self.token})
+        try:
+            with urllib.request.urlopen(rejected,timeout=8):
+                raise AssertionError('Return receiver accepted previous receiver credential')
+        except urllib.error.HTTPError as denial:
+            require(denial.code==403,'Expected HTTP 403 for retired receiver credential')
+        require(receive_status()==before and sql(self.win_port,reader,order)['rows']==first_rows,
+                'Rejected credential changed standby rows or LSNs')
+        sent=json.loads(execute([self.windows,'ship','--source',marker,'--port',self.receive,'--replication-token',token]))
+        after=receive_status()
+        require(sent['sent_lsn']==archive['end_lsn'] and set(after.values())=={archive['end_lsn']},'Return replay did not reach the sender')
+        require(sql(self.win_port,reader,order)['rows']==latest,'Returned standby rows differ from Linux owner')
+        self.stop_primary()
+        self.stop_replica()
+        def windows_handoff(mode, file=None, error=None):
+            cmd=[self.windows,'handoff-'+mode,'--data',rejoined,'--key-file',self.key]
+            if file:cmd+=['--source',file]
+            raw=execute(cmd,error=error)
+            return json.loads(raw) if not error else None
+        windows_handoff('accept',first_ticket,'HANDOFF_TARGET')
+        offer=windows_handoff('offer')
+        self.verify_signature(offer)
+        offerfile=self.blob('return-offer.json',offer)
+        ticket=json.loads(self.linux('handoff-surrender','--data',self.guest+'/standby','--key-file',
+                                     self.guest+'/operator.key','--source',self.mapped(offerfile)))
+        self.verify_signature(ticket)
+        ticketfile=self.blob('return-ticket.json',ticket)
+        accepted=windows_handoff('accept',ticketfile)
+        require(accepted['writable'] and accepted['timeline']==ticket['timeline'] and ticket['epoch']==3,'Return epoch/ownership')
+        # Retrying a now-retired primary's earlier accept must never attest writability.
+        self.transfer('accept',first_ticket,'FENCED')
+        previous=self.start_replica(receive=False)
+        sql(self.linux_port,previous,"INSERT INTO witness VALUES(115,'retired Linux')",'FENCED')
+        self.stop_replica()
+        old=self.start_primary()
+        sql(self.win_port,old,"INSERT INTO witness VALUES(116,'retired Windows directory')",'FENCED')
+        self.stop_primary()
+        require(durable_image()==original_image,'Retired Windows durable data files were changed')
+        new=self.start_primary(rejoined)
+        require(sql(self.win_port,new,order)['rows']==latest,'Returned owner lost a committed row')
+        sql(self.win_port,new,"INSERT INTO witness VALUES(103,'new writable Windows directory')")
+        final=sql(self.win_port,new,order)['rows']
+        require(len(final)==len(latest)+1 and final[:-1]==latest,'Reverse commit lost earlier rows')
+        self.stop_primary()
+        require(windows_handoff('accept',ticketfile)['idempotent'],'Reverse accept retry not idempotent')
+        return {'base_rows':len(first_rows),'caught_up_rows':len(latest),'reverse_owner_rows':len(final),
+                'read_only_until_transfer':True,'retired_receiver_credential_http':403,
+                'previous_transfer_ticket_rejected':True,'old_directories_refused_writes':True,
+                'retired_windows_files_unchanged':original_image,'return_backup_and_archive':'WSL shared mount with SHA-256 checked archive and Windows authenticated loopback replay',
+                'before_receipt':before,'after_receipt':after,'sender_lsn':sent['sent_lsn'],'epoch':ticket['epoch'],
+                'timeline':ticket['timeline'],'linux_and_joined_windows_fingerprint':hashlib.sha256(json.dumps(latest,separators=(',',':')).encode()).hexdigest(),
+                'reverse_owner_final_fingerprint':hashlib.sha256(json.dumps(final,separators=(',',':')).encode()).hexdigest()}
 
     def run(self):
         guest=self.guest
@@ -218,6 +315,7 @@ class Scenario:
         self.stop_replica()
         require(self.transfer('accept',signed)['idempotent'],'Old ticket failed after new acknowledged commits')
         self.stop_primary()
+        return_leg=self.restore_and_return(order,final,signed)
         wal_bytes=Path(archive['manifest_path']).with_name(archive['file']).stat().st_size
         return {'status':'PASS','primary':'Windows native','standby':self.ws('uname','-sr'),'transport':'WSL2 loopback forwarding',
                 'windows_sha256':hashlib.sha256(self.windows.read_bytes()).hexdigest(),
@@ -228,7 +326,7 @@ class Scenario:
                 'elapsed_explicit_ship_seconds_including_cli':seconds,'surrender_start_to_first_new_primary_query_seconds':elapsed,
                 'measurement_scope':'one end-to-end functional run; CLI and WSL process launch included; no physical hardware failover',
                 'replayed_rows':len(rows),'pre_handoff_fingerprint':hashlib.sha256(json.dumps(rows,separators=(',',':')).encode()).hexdigest(),
-                'new_primary_rows':len(final),'target_epoch':ticket['epoch'],'target_timeline':ticket['timeline'],
+                'new_primary_rows':len(final),'target_epoch':ticket['epoch'],'target_timeline':ticket['timeline'],'rejoin_and_reverse':return_leg,
                 'checks':['disconnected shipment outcome unknown','lagging offer refused','standby refused SQL writes',
                           'independent domain ordinary PROMOTE refused','tampered offer refused','wrong candidate refused',
                           'idempotent WAL shipment','repeated surrender returned identical ticket',

@@ -41,6 +41,8 @@ bash build.sh
 
 ## 独立复现
 
+接管后还可验证旧主回归。Windows 原数据目录保留退役状态，在同一台 Windows 主机的新目录恢复 Linux 新主的快照，再追赶其日志。测试核对备库只读、拒绝旧令牌、两端行集指纹，以及反向交接后第 3 任期的写入。反向归档经 WSL 共享挂载转送到 Windows 本地接收器。[双向交接脚本](apps/edu-dbms/tests/cross_system_handoff.py)
+
 从应用目录运行以下命令。故障脚本只启动自己的临时服务，输出目录须为新目录。26 步接口测试还使用 Node、Playwright 与 Chromium。公开版保留课内共同 SQL 的输入和预期结果。[业务用例](apps/edu-dbms/tests/course_integrity_workload.json)
 
 ```sh
